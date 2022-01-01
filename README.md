@@ -1,2 +1,2 @@
-# slam_bot_nano
+# SLAM Bot Nano
 SLAM! 
