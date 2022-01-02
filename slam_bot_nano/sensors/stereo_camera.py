@@ -68,8 +68,11 @@ class StereoCamera:
 
     def read(self):
         with self.read_lock:
-            frame = self.frame.copy()
-            grabbed = self.grabbed
+            if self.grabbed:
+                frame = self.frame.copy()
+                grabbed = self.grabbed
+            else:
+                return False, None
         return grabbed, frame
 
     def release(self):

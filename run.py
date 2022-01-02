@@ -5,6 +5,8 @@ import sys
 from adafruit_servokit import ServoKit
 import termios, fcntl, sys, os
 from jetracer.nvidia_racecar import NvidiaRacecar
+import numpy as np
+import cv2
 
 from slam_bot_nano.vehicle.utils import init_bot
 from slam_bot_nano.controls.keyboard_input import KeyboardInput
@@ -18,13 +20,7 @@ def control_loop():
     left_camera = StereoCamera(0).start()
     right_camera = StereoCamera(1).start()
 
-    host = '192.168.2.205'
-    RemoteDisplay = ImageTransferService(host)
-
     print("Controls Ready!")
-
-    # Check remote display is up
-    print(RemoteDisplay.ping())
 
     c = 'r'
 
@@ -36,8 +32,9 @@ def control_loop():
 
         if left_grabbed and right_grabbed:
             images = np.hstack((left_frame, right_frame))
+            images = cv2.flip(images, 0)
             cv2.imshow("Camera Images", images)
-            RemoteDisplay.sendImage(images)
+            cv2.waitKey(1)
 
         try:
             c = kb.getch()
@@ -60,7 +57,7 @@ def control_loop():
             else:
                 n_controlless_timesteps += 1
 
-                if n_controlless_timesteps > 500:
+                if n_controlless_timesteps > 500000:
                     car.straight()
                     car.brake()
 

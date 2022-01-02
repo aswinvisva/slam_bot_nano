@@ -1,15 +1,24 @@
 import termios, fcntl, sys, os, tty
+import select
 
+def key_pressed():
+    return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 class KeyboardInput:
 
-    def getch(self):
+    def __init__(self):
+        # Save the terminal settings
         fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(sys.stdin.fileno())
-            ch = sys.stdin.read(1)
+        self.oldterm = termios.tcgetattr(fd)
+        newattr = termios.tcgetattr(fd)
+        newattr[3] = newattr[3] & ~termios.ICANON & ~termios.ECHO
+        termios.tcsetattr(fd, termios.TCSANOW, newattr)
 
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return ch
+        oldflags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, oldflags | os.O_NONBLOCK)
+
+    def __exit__(self, type, value, traceback):
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+
+    def getch(self):
+        return sys.stdin.read(1)
