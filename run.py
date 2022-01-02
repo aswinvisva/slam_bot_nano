@@ -8,7 +8,7 @@ from jetracer.nvidia_racecar import NvidiaRacecar
 
 from slam_bot_nano.vehicle.utils import init_bot
 from slam_bot_nano.controls.keyboard_input import KeyboardInput
-from slam_bot_nano.sensors.stereo_cameras import StereoCamera
+from slam_bot_nano.sensors.stereo_camera import StereoCamera
 from slam_bot_nano.client_server_com.image_transfer_service import ImageTransferService
 
 
@@ -19,7 +19,7 @@ def control_loop():
     right_camera = StereoCamera(1).start()
 
     host = '192.168.2.205'
-    RemoteDisplay = ImageTransferService.ImageTransferService(host)
+    RemoteDisplay = ImageTransferService(host)
 
     print("Controls Ready!")
 
