@@ -15,21 +15,22 @@ from slam_bot_nano.vehicle.utils import init_bot
 from slam_bot_nano.controls.keyboard_input import KeyboardInput
 from slam_bot_nano.sensors.stereo_camera import StereoCamera
 from slam_bot_nano.sensors.lidar import Lidar2D
-from slam_bot_nano.client_server_com import ImageTransferClient
+from slam_bot_nano.client_server_com.image_transfer_service import ImageTransferClient
 
 
 RMAX = 32.0
 
 class ControlLoop:
 
-    def __init__(self):
+    def __init__(self, send_over_udp=False):
         self.car = init_bot()
         self.kb = KeyboardInput()
         self.left_camera = StereoCamera(0).start()
         self.right_camera = StereoCamera(1).start()
         self.lidar = Lidar2D()
-        self.it = ImageTransferClient("192.168.2.1", 9000)
+        self.it = ImageTransferClient("192.168.2.212", 5000, "192.168.2.205")
         self.frames_without_controls = 0
+        self.send_over_udp = send_over_udp
 
         self.camera_lock = threading.Lock()
         self.lidar_lock = threading.Lock()
@@ -67,7 +68,11 @@ class ControlLoop:
         self.controls_thread = threading.Thread(target=self.get_controls, daemon=True)
         self.controls_thread.start()
 
-        self.display_thread = threading.Thread(target=self.send_info, daemon=True)
+        if self.send_over_udp:
+            self.display_thread = threading.Thread(target=self.send_info, daemon=True)
+        else:
+            self.display_thread = threading.Thread(target=self.display_info, daemon=True)
+            
         self.display_thread.start()
 
         self.image_sensor_thread.join()
@@ -145,14 +150,14 @@ class ControlLoop:
                     images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
                     self.it.sendall(images)
 
-    # def display_info(self):
-    #     while self.running:
-    #         with self.camera_lock:
-    #             with self.lidar_lock:
-    #                 if self.left_grabbed and self.right_grabbed and self.lidar_grabbed:
-    #                     images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
-    #                     cv2.imshow("Camera Images", images)
-    #                     cv2.waitKey(1)
+    def display_info(self):
+        while self.running:
+            with self.camera_lock:
+                with self.lidar_lock:
+                    if self.left_grabbed and self.right_grabbed and self.lidar_grabbed:
+                        images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
+                        cv2.imshow("Camera Images", images)
+                        cv2.waitKey(1)
 
 if __name__ == "__main__":
     cl = ControlLoop()
