@@ -14,11 +14,12 @@ class KeyboardInput:
         newattr[3] = newattr[3] & ~termios.ICANON & ~termios.ECHO
         termios.tcsetattr(fd, termios.TCSANOW, newattr)
 
-        oldflags = fcntl.fcntl(fd, fcntl.F_GETFL)
-        fcntl.fcntl(fd, fcntl.F_SETFL, oldflags | os.O_NONBLOCK)
+        self.oldflags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, self.oldflags | os.O_NONBLOCK)
 
     def __exit__(self, type, value, traceback):
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+        fcntl.fcntl(fd, fcntl.F_SETFL, self.oldflags)
 
     def getch(self):
         return sys.stdin.read(1)
