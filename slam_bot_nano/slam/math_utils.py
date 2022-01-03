@@ -8,57 +8,75 @@ def poseRt(R, t):
     ret[:3, 3] = t
     return ret   
 
+def drawFeatureTracks(img, kps_ref, kps_cur, mask_match):
+    draw_img = img
+    num_outliers = 0           
+
+    for i,pts in enumerate(zip(kps_ref, kps_cur)):
+        if mask_match[i]:
+            p1, p2 = pts 
+            a,b = p1.astype(int).ravel()
+            c,d = p2.astype(int).ravel()
+            cv2.line(draw_img, (a,b),(c,d), (0,255,0), 1)
+            cv2.circle(draw_img,(a,b),1, (0,0,255),-1)   
+        else:
+            num_outliers+=1
+    
+    return draw_img 
+
+def computeFundamentalMatrix(kps_ref, kps_cur, kRansacThresholdPixels = 0.1, kRansacProb = 0.999):
+    F, mask = cv2.findFundamentalMat(kps_ref, kps_cur, cv2.FM_RANSAC)
+    if F is None or F.shape == (1, 1):
+        # no fundamental matrix found
+        return None, None
+    elif F.shape[0] > 3:
+        # more than one matrix found, just pick the first
+        F = F[0:3, 0:3]
+    return np.matrix(F), mask 	
+
 def estimatePose(
     self, 
-    kps_ref_unmatched, 
-    kps_cur_unmatched, 
-    matches, 
+    kps_ref, 
+    kps_cur, 
     cam, 
-    kUseEssentialMatrixEstimation=True, 
+    kUseEssentialMatrixEstimation=False, 
     kRansacProb = 0.999,
     kRansacThresholdNormalized = 0.0003,
     img_ref=None,
     img_cur=None):	
 
-    kps_ref = []
-    kps_cur = []
-    for i,(m) in enumerate(matches):
-        # if m.distance < 20:
-        kps_cur.append(kps_cur_unmatched[m.trainIdx].pt)
-        kps_ref.append(kps_ref_unmatched[m.queryIdx].pt)
-
     if len(kps_ref) == 0 or len(kps_cur) == 0:
         return None, None, None
 
-    matched_image = None
-
-    if img_ref is not None and img_cur is not None:
-        s_m = sorted(matches, key=lambda k: k.distance)
-
-        img_ref.img = np.array(img_ref.img)
-        img_cur.img = np.array(img_cur.img)
-
-        matched_image = cv2.drawMatches(img_ref.img,kps_ref_unmatched,img_cur.img,kps_cur_unmatched,s_m[:10],None,flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-
-    kps_cur  = np.asarray(kps_cur)
-    kps_ref = np.asarray(kps_ref)
-
     kp_ref_u = cam.undistort_points(kps_ref)	
     kp_cur_u = cam.undistort_points(kps_cur)	        
-    kpn_ref = cam.unproject_points(kp_ref_u)
-    kpn_cur = cam.unproject_points(kp_cur_u)
+    kp_ref = cam.unproject_points(kp_ref_u)
+    kp_cur = cam.unproject_points(kp_cur_u)
 
     if kUseEssentialMatrixEstimation:
         # the essential matrix algorithm is more robust since it uses the five-point algorithm solver by D. Nister (see the notes and paper above )
-        E, mask_match = cv2.findEssentialMat(kpn_cur, kpn_ref, focal=1, pp=(0., 0.), method=cv2.RANSAC, prob=kRansacProb, threshold=kRansacThresholdNormalized)
+        E, mask_match = cv2.findEssentialMat(kp_ref, kp_cur, focal=1, pp=(0., 0.), method=cv2.RANSAC, prob=kRansacProb, threshold=kRansacThresholdNormalized)
     else:
         # just for the hell of testing fundamental matrix fitting ;-) 
         F, mask_match = computeFundamentalMatrix(kp_cur_u, kp_ref_u)
+
+        if F is None:
+            return None, None, None
+
         E = cam.K.T @ F @ cam.K    # E = K.T * F * K 
     #self.removeOutliersFromMask(self.mask)  # do not remove outliers, the last unmatched/outlier features can be matched and recognized as inliers in subsequent frames                          
-    
+
     if E is None or E.shape[0] != 3 or E.shape[1] != 3:
-        return None, None, matched_image
+        return None, None, None
     
-    _, R, t, mask = cv2.recoverPose(E, kpn_cur, kpn_ref, focal=1, pp=(0., 0.))   
+    matched_image = None
+
+    if img_ref is not None and img_cur is not None:
+        img_ref.img = np.array(img_ref.img)
+        img_cur.img = np.array(img_cur.img)
+
+        matched_image = drawFeatureTracks(img_cur.img, kps_ref, kps_cur, mask_match)
+
+    _, R, t, mask = cv2.recoverPose(E, kp_ref, kp_cur, focal=1, pp=(0., 0.))   
+
     return R,t,matched_image  # Rrc, trc (with respect to 'ref' frame) 

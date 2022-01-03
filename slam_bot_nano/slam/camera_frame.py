@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import numpy as np
 import cv2
 
@@ -5,7 +7,7 @@ class ORBFeatureExtractor:
 
     def __init__(self):
         self.extractor = cv2.ORB_create()
-        self.matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        self.matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
     
     def extract(self, img):
         kp, des = self.extractor.detectAndCompute(img,None)
@@ -17,15 +19,48 @@ class ORBFeatureExtractor:
         if des1 is None or des2 is None:
             return []
     
-        matches = self.matcher.match(des1,des2)
+        matches = self.matcher.knnMatch(des1, des2, k=2)
 
-        return matches
+        return self.goodMatchesOneToOne(matches, des1, des2) 
+
+    # input: des1 = query-descriptors, des2 = train-descriptors
+    # output: idx1, idx2  (vectors of corresponding indexes in des1 and des2, respectively)
+    # N.B.: this returns matches where each trainIdx index is associated to only one queryIdx index    
+    def goodMatchesOneToOne(self, matches, des1, des2, ratio_test=0.7):
+        len_des2 = len(des2)
+        idx1, idx2 = [], []  
+        
+        if matches is not None:         
+            float_inf = float('inf')
+            dist_match = defaultdict(lambda: float_inf)   
+            index_match = dict()  
+            for m, n in matches:
+                if m.distance > ratio_test * n.distance:
+                    continue     
+                dist = dist_match[m.trainIdx]
+                if dist == float_inf: 
+                    # trainIdx has not been matched yet
+                    dist_match[m.trainIdx] = m.distance
+                    idx1.append(m.queryIdx)
+                    idx2.append(m.trainIdx)
+                    index_match[m.trainIdx] = len(idx2)-1
+                else:
+                    if m.distance < dist: 
+                        # we have already a match for trainIdx: if stored match is worse => replace it
+                        #print("double match on trainIdx: ", m.trainIdx)
+                        index = index_match[m.trainIdx]
+                        assert(idx2[index] == m.trainIdx) 
+                        idx1[index]=m.queryIdx
+                        idx2[index]=m.trainIdx                        
+        return idx1, idx2
 
 class CameraFrame:
 
     def __init__(self, img, feature_extractor):
         self.feature_extractor = feature_extractor
         self._kp, self._des = self.feature_extractor.extract(img)
+        self._kp = np.array([x.pt for x in self._kp], dtype=np.float32)
+
         self._pose = None
         self.img = img
 

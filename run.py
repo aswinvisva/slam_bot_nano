@@ -64,8 +64,11 @@ class ControlLoop:
         self.cur_R = np.eye(3,3) # current rotation 
         self.cur_t = np.zeros((3,1)) # current translation 
         self.prev_frame = None
+        self.cur_frame = None
         self.matched_image = None
         self.trajectory_image = None
+
+        self.frame_shape = (360, 640, 3)
 
         self.feature_extractor = ORBFeatureExtractor()
 
@@ -94,10 +97,14 @@ class ControlLoop:
             
         self.display_thread.start()
 
+        self.processing_thread = threading.Thread(target=self.process_data, daemon=True)
+        self.processing_thread.start()
+
         self.image_sensor_thread.join()
         self.lidar_sensor_thread.join()
         self.controls_thread.join()
         self.display_thread.join()
+        self.processing_thread.join()
 
     def stop(self):
         self.running = False
@@ -106,50 +113,69 @@ class ControlLoop:
         self.controls_thread.join()
         self.display_thread.join()
 
+    def process_data(self):
+        while self.running:   
+            with self.camera_lock:
+                prev_frame, cur_frame = self.prev_frame, self.cur_frame
+                shape = self.frame_shape
+
+            if prev_frame is None:
+                self.t0_est = np.array([self.cur_t[0], self.cur_t[1], self.cur_t[2]])  # starting translation 
+            else:
+                idxs_ref, idxs_cur = self.feature_extractor.match(prev_frame, cur_frame)
+
+                kps_ref = np.asarray(prev_frame.kp[idxs_ref])
+                kps_cur = np.asarray(cur_frame.kp[idxs_cur])
+
+                R, t, self.matched_image = estimatePose(self, kps_ref, kps_cur, self.left_camera, img_ref=prev_frame, img_cur=cur_frame)
+
+                print("New controls")
+
+                print("="*10)
+                print(R)
+                print("="*10)
+                print(t)
+                print("="*10)
+                
+                if self.matched_image is not None and self.matched_image.size > 0:
+                    self.matched_image = cv2.resize(self.matched_image, (shape[1] * 2, shape[0])) 
+
+                if R is not None and t is not None:
+                    self.cur_t = self.cur_t + self.cur_R.dot(t) 
+                    self.cur_R = self.cur_R.dot(R)
+
+            if (self.t0_est is not None):             
+                p = [self.cur_t[0]-self.t0_est[0], self.cur_t[1]-self.t0_est[1], self.cur_t[2]-self.t0_est[2]]   # the estimated traj starts at 0
+                self.traj3d_est.append(self.cur_t)
+                self.poses.append(poseRt(self.cur_R, p))   
+
+                traj3d_est_np = np.array(self.traj3d_est)
+
+                print(self.cur_t)
+                print(">"*10)
+
+                self.trajectory_fig.canvas.draw()
+                self.trajectory_sublot.clear()
+                self.trajectory_sublot.scatter(traj3d_est_np[:, 0], traj3d_est_np[:, 1])
+                trajectory_image = np.frombuffer(self.trajectory_fig.canvas.tostring_rgb(), dtype='uint8')
+                self.trajectory_image = trajectory_image.reshape(self.trajectory_fig.canvas.get_width_height()[::-1] + (3,))
+
+                self.trajectory_image = cv2.resize(self.trajectory_image, (shape[1], shape[0])) 
+
     def get_image_sensor_data(self):
         while self.running:   
             with self.camera_lock:
+                self.prev_frame = self.cur_frame
+
                 self.left_grabbed, self.left_frame = self.left_camera.read()
                 self.right_grabbed, self.right_frame = self.right_camera.read()
 
                 self.left_frame = cv2.flip(self.left_frame, -1)
                 self.right_frame = cv2.flip(self.right_frame, -1)
 
-                left_frame, right_frame = self.left_frame, self.right_frame
-
                 frame = CameraFrame(self.left_frame, self.feature_extractor)
 
-                if self.prev_frame is None:
-                    self.t0_est = np.array([self.cur_t[0], self.cur_t[1], self.cur_t[2]])  # starting translation 
-                else:
-                    matches = self.feature_extractor.match(self.prev_frame, frame)
-
-                    R, t, self.matched_image = estimatePose(self, self.prev_frame.kp, frame.kp, matches, self.left_camera, img_ref=self.prev_frame, img_cur=frame)
-                    self.matched_image = cv2.resize(self.matched_image, (self.left_frame.shape[1] * 3, self.left_frame.shape[0])) 
-
-                    if R is not None and t is not None:
-                        self.cur_t = self.cur_t + self.cur_R.dot(t) 
-                        self.cur_R = self.cur_R.dot(R)
-
-                # if (self.t0_est is not None):             
-                #     p = [self.cur_t[0]-self.t0_est[0], self.cur_t[1]-self.t0_est[1], self.cur_t[2]-self.t0_est[2]]   # the estimated traj starts at 0
-                #     self.traj3d_est.append(p)
-                #     self.poses.append(poseRt(self.cur_R, p))   
-
-                #     traj3d_est_np = np.array(self.traj3d_est)
-
-                #     self.trajectory_fig.canvas.draw()
-                #     self.trajectory_sublot.clear()
-                #     self.trajectory_sublot.scatter(traj3d_est_np[:, 0], traj3d_est_np[:, 1])
-                #     trajectory_image = np.frombuffer(self.trajectory_fig.canvas.tostring_rgb(), dtype='uint8')
-                #     self.trajectory_image = trajectory_image.reshape(self.trajectory_fig.canvas.get_width_height()[::-1] + (3,))
-
-                #     cv2.imshow("traj", self.trajectory_image)
-                #     cv2.waitKey(1)
-
-                    # self.trajectory_image = cv2.resize(self.trajectory_image, (self.left_frame.shape[1] * 3, self.left_frame.shape[0])) 
-
-                self.prev_frame = frame
+                self.cur_frame = frame
 
     def get_lidar_data(self):
         while self.running:   
@@ -163,7 +189,7 @@ class ControlLoop:
                     self.lidar_polar.scatter(angle, ran, c=intensity, cmap='hsv', alpha=0.95)
                     lidar_frame = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype='uint8')
                     self.lidar_frame = lidar_frame.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
-                    self.lidar_frame = cv2.resize(self.lidar_frame, (self.left_frame.shape[1], self.left_frame.shape[0])) 
+                    self.lidar_frame = cv2.resize(self.lidar_frame, (self.frame_shape[1], self.frame_shape[0])) 
 
     def get_controls(self):
         c = 'r'
@@ -210,11 +236,12 @@ class ControlLoop:
             with self.camera_lock:
                 with self.lidar_lock:
                     if self.left_grabbed and self.right_grabbed and self.lidar_grabbed:
-                        if self.matched_image is None:
+                        if self.matched_image is None or self.trajectory_image is None:
                             images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
                         else:
                             images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
-                            images = np.vstack((images, self.matched_image))
+                            tmp = np.hstack((self.matched_image, self.trajectory_image))
+                            images = np.vstack((images, tmp))
                         
                         cv2.imshow("Camera Images", images)
                         cv2.waitKey(1)
