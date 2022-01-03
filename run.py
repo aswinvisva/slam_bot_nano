@@ -16,6 +16,9 @@ from slam_bot_nano.controls.keyboard_input import KeyboardInput
 from slam_bot_nano.sensors.stereo_camera import StereoCamera
 from slam_bot_nano.sensors.lidar import Lidar2D
 from slam_bot_nano.client_server_com.image_transfer_service import ImageTransferClient
+from slam_bot_nano.slam.camera_frame import CameraFrame
+from slam_bot_nano.slam.feature_extractor import ORBFeatureExtractor
+from slam_bot_nano.slam.math_utils import *
 
 
 RMAX = 32.0
@@ -49,6 +52,9 @@ class ControlLoop:
         self.lidar_polar.autoscale_view(True,True,True)
         self.lidar_polar.set_rmax(RMAX)
         self.lidar_polar.grid(True)
+
+        self.frames = []
+        self.feature_extractor = ORBFeatureExtractor()
 
         print("Init finished!")
 
@@ -90,11 +96,28 @@ class ControlLoop:
     def get_image_sensor_data(self):
         while self.running:   
             with self.camera_lock:
+                if len(self.frames) > 0:
+                    prev_frame = self.frames[-1]
+                else:
+                    prev_frame = None
+
                 self.left_grabbed, self.left_frame = self.left_camera.read()
                 self.right_grabbed, self.right_frame = self.right_camera.read()
 
                 self.left_frame = cv2.flip(self.left_frame, -1)
                 self.right_frame = cv2.flip(self.right_frame, -1)
+
+                frame = CameraFrame(self.left_frame, self.feature_extractor)
+
+                if prev_frame is None:
+                    frame.pose = np.array([0, 0])
+                else:
+                    matches = self.feature_extractor.match(prev_frame, frame)
+                    F = compute_fundamental_matrix(prev_frame, frame, matches)
+                    Rt = fundamental_to_rt(F)
+                    frame.pose = np.dot(Rt, prev_frame.pose)
+
+                self.frames.append(frame)
 
     def get_lidar_data(self):
         while self.running:   
