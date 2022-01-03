@@ -2,7 +2,10 @@ import cv2
 import numpy as np
 import threading
 
-FILE_NAMES = {0: "../data/calib_left.npz", 1: "../data/calib_right.npz"}
+FILE_NAMES = {
+    0: "/home/aswin/slam_bot_nano/slam_bot_nano/data/calib_left.npz", 
+    1: "/home/aswin/slam_bot_nano/slam_bot_nano/data/calib_right.npz"
+}
 
 class StereoCamera:
 
@@ -25,8 +28,11 @@ class StereoCamera:
 
         with np.load(FILE_NAMES[sensor_id]) as data:
             self.K = data['mtx']
+            self.D = data['dist']
 
         self.Kinv = np.linalg.inv(self.K)
+
+        self.is_distorted = np.linalg.norm(self.D) > 1e-10
 
     #Opening the cameras
     def open(self, gstreamer_pipeline_string):
@@ -129,6 +135,13 @@ class StereoCamera:
         return projs.T, zs
 
     def unproject_points(self, pts):
+        # turn [[x,y]] -> [[x,y,1]]
+        def add_ones(x):
+            if len(x.shape) == 1:
+                return add_ones_1D(x)
+            else:
+                return np.concatenate([x, np.ones((x.shape[0], 1))], axis=1)
+        
         return np.dot(self.Kinv, add_ones(pts).T).T[:, 0:2]
 
     def undistort_points(self, pts):

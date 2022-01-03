@@ -52,10 +52,20 @@ class ControlLoop:
         self.lidar_polar.set_rmax(RMAX)
         self.lidar_polar.grid(True)
 
-        self.positions = []
-        self.cur_R = None
-        self.cur_t = None
+        self.trajectory_fig = plt.figure()
+        self.trajectory_fig.canvas.set_window_title('Trajectory')
+        self.trajectory_sublot = plt.subplot()
+        self.trajectory_sublot.autoscale_view(True,True,True)
+        self.trajectory_sublot.grid(True)
+
+        self.t0_est = None 
+        self.traj3d_est = [] 
+        self.poses = []
+        self.cur_R = np.eye(3,3) # current rotation 
+        self.cur_t = np.zeros((3,1)) # current translation 
         self.prev_frame = None
+        self.matched_image = None
+        self.trajectory_image = None
 
         self.feature_extractor = ORBFeatureExtractor()
 
@@ -105,20 +115,39 @@ class ControlLoop:
                 self.left_frame = cv2.flip(self.left_frame, -1)
                 self.right_frame = cv2.flip(self.right_frame, -1)
 
+                left_frame, right_frame = self.left_frame, self.right_frame
+
                 frame = CameraFrame(self.left_frame, self.feature_extractor)
 
                 if self.prev_frame is None:
-                    self.cur_R = np.array([0, 0, 0])
-                    self.cur_t = np.array([0, 0, 0])
+                    self.t0_est = np.array([self.cur_t[0], self.cur_t[1], self.cur_t[2]])  # starting translation 
                 else:
                     matches = self.feature_extractor.match(self.prev_frame, frame)
 
-                    R, t = estimatePose(self.prev_frame.kp, frame.kp, cam, kUseEssentialMatrixEstimation=True)
+                    R, t, self.matched_image = estimatePose(self, self.prev_frame.kp, frame.kp, matches, self.left_camera, img_ref=self.prev_frame, img_cur=frame)
+                    self.matched_image = cv2.resize(self.matched_image, (self.left_frame.shape[1] * 3, self.left_frame.shape[0])) 
 
-                    self.cur_t = self.cur_t + absolute_scale*self.cur_R.dot(t) 
-                    self.cur_R = self.cur_R.dot(R)
+                    if R is not None and t is not None:
+                        self.cur_t = self.cur_t + self.cur_R.dot(t) 
+                        self.cur_R = self.cur_R.dot(R)
 
-                    print(self.cur_t, self.cur_R)
+                # if (self.t0_est is not None):             
+                #     p = [self.cur_t[0]-self.t0_est[0], self.cur_t[1]-self.t0_est[1], self.cur_t[2]-self.t0_est[2]]   # the estimated traj starts at 0
+                #     self.traj3d_est.append(p)
+                #     self.poses.append(poseRt(self.cur_R, p))   
+
+                #     traj3d_est_np = np.array(self.traj3d_est)
+
+                #     self.trajectory_fig.canvas.draw()
+                #     self.trajectory_sublot.clear()
+                #     self.trajectory_sublot.scatter(traj3d_est_np[:, 0], traj3d_est_np[:, 1])
+                #     trajectory_image = np.frombuffer(self.trajectory_fig.canvas.tostring_rgb(), dtype='uint8')
+                #     self.trajectory_image = trajectory_image.reshape(self.trajectory_fig.canvas.get_width_height()[::-1] + (3,))
+
+                #     cv2.imshow("traj", self.trajectory_image)
+                #     cv2.waitKey(1)
+
+                    # self.trajectory_image = cv2.resize(self.trajectory_image, (self.left_frame.shape[1] * 3, self.left_frame.shape[0])) 
 
                 self.prev_frame = frame
 
@@ -181,7 +210,12 @@ class ControlLoop:
             with self.camera_lock:
                 with self.lidar_lock:
                     if self.left_grabbed and self.right_grabbed and self.lidar_grabbed:
-                        images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
+                        if self.matched_image is None:
+                            images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
+                        else:
+                            images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
+                            images = np.vstack((images, self.matched_image))
+                        
                         cv2.imshow("Camera Images", images)
                         cv2.waitKey(1)
 

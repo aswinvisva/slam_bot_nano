@@ -13,6 +13,10 @@ class ORBFeatureExtractor:
 
     def match(self, f1, f2):
         des1, des2 = f1.des, f2.des
+        
+        if des1 is None or des2 is None:
+            return []
+    
         matches = self.matcher.match(des1,des2)
 
         return matches
@@ -23,6 +27,7 @@ class CameraFrame:
         self.feature_extractor = feature_extractor
         self._kp, self._des = self.feature_extractor.extract(img)
         self._pose = None
+        self.img = img
 
     @property
     def kp(self):
