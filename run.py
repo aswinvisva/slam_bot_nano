@@ -52,7 +52,11 @@ class ControlLoop:
         self.lidar_polar.set_rmax(RMAX)
         self.lidar_polar.grid(True)
 
-        self.frames = []
+        self.positions = []
+        self.cur_R = None
+        self.cur_t = None
+        self.prev_frame = None
+
         self.feature_extractor = ORBFeatureExtractor()
 
         print("Init finished!")
@@ -95,11 +99,6 @@ class ControlLoop:
     def get_image_sensor_data(self):
         while self.running:   
             with self.camera_lock:
-                if len(self.frames) > 0:
-                    prev_frame = self.frames[-1]
-                else:
-                    prev_frame = None
-
                 self.left_grabbed, self.left_frame = self.left_camera.read()
                 self.right_grabbed, self.right_frame = self.right_camera.read()
 
@@ -108,16 +107,20 @@ class ControlLoop:
 
                 frame = CameraFrame(self.left_frame, self.feature_extractor)
 
-                if prev_frame is None:
-                    frame.pose = np.array([0, 0, 0, 1])
+                if self.prev_frame is None:
+                    self.cur_R = np.array([0, 0, 0])
+                    self.cur_t = np.array([0, 0, 0])
                 else:
-                    matches = self.feature_extractor.match(prev_frame, frame)
-                    F = compute_fundamental_matrix(prev_frame, frame, matches)
-                    Rt = fundamental_to_rt(F)
-                    frame.pose = np.dot(Rt, prev_frame.pose)
-                    print(frame.pose)
+                    matches = self.feature_extractor.match(self.prev_frame, frame)
 
-                self.frames.append(frame)
+                    R, t = estimatePose(self.prev_frame.kp, frame.kp, cam, kUseEssentialMatrixEstimation=True)
+
+                    self.cur_t = self.cur_t + absolute_scale*self.cur_R.dot(t) 
+                    self.cur_R = self.cur_R.dot(R)
+
+                    print(self.cur_t, self.cur_R)
+
+                self.prev_frame = frame
 
     def get_lidar_data(self):
         while self.running:   
