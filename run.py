@@ -16,8 +16,7 @@ from slam_bot_nano.controls.keyboard_input import KeyboardInput
 from slam_bot_nano.sensors.stereo_camera import StereoCamera
 from slam_bot_nano.sensors.lidar import Lidar2D
 from slam_bot_nano.client_server_com.image_transfer_service import ImageTransferClient
-from slam_bot_nano.slam.camera_frame import CameraFrame
-from slam_bot_nano.slam.feature_extractor import ORBFeatureExtractor
+from slam_bot_nano.slam.camera_frame import CameraFrame, ORBFeatureExtractor
 from slam_bot_nano.slam.math_utils import *
 
 
@@ -110,12 +109,13 @@ class ControlLoop:
                 frame = CameraFrame(self.left_frame, self.feature_extractor)
 
                 if prev_frame is None:
-                    frame.pose = np.array([0, 0])
+                    frame.pose = np.array([0, 0, 0, 1])
                 else:
                     matches = self.feature_extractor.match(prev_frame, frame)
                     F = compute_fundamental_matrix(prev_frame, frame, matches)
                     Rt = fundamental_to_rt(F)
                     frame.pose = np.dot(Rt, prev_frame.pose)
+                    print(frame.pose)
 
                 self.frames.append(frame)
 

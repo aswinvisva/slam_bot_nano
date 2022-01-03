@@ -1,7 +1,21 @@
 import numpy as np
 import cv2
 
-from feature_extractor import ORBFeatureExtractor
+class ORBFeatureExtractor:
+
+    def __init__(self):
+        self.extractor = cv2.ORB_create()
+        self.matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    
+    def extract(self, img):
+        kp, des = self.extractor.detectAndCompute(img,None)
+        return kp, des
+
+    def match(self, f1, f2):
+        des1, des2 = f1.des, f2.des
+        matches = self.matcher.match(des1,des2)
+
+        return matches
 
 class CameraFrame:
 
@@ -21,3 +35,7 @@ class CameraFrame:
     @property
     def pose(self):
         return self._pose
+
+    @pose.setter
+    def pose(self, p):
+        self._pose = p

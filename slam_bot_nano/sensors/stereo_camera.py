@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import threading
 
+FILE_NAMES = {0: "../data/calib_left.npz", 1: "../data/calib_right.npz"}
+
 class StereoCamera:
 
     def __init__(self, sensor_id):
@@ -20,6 +22,11 @@ class StereoCamera:
 
         gstreamer_pipeline_string = self.gstreamer_pipeline()
         self.open(gstreamer_pipeline_string)
+
+        with np.load(FILE_NAMES[sensor_id]) as data:
+            self.K = data['mtx']
+
+        self.Kinv = np.linalg.inv(self.K)
 
     #Opening the cameras
     def open(self, gstreamer_pipeline_string):
@@ -114,3 +121,21 @@ class StereoCamera:
                     display_height,
                 )
         )
+
+    def project(self, xcs):
+        projs = self.K @ xcs.T     
+        zs = projs[-1]      
+        projs = projs[:2]/ zs   
+        return projs.T, zs
+
+    def unproject_points(self, pts):
+        return np.dot(self.Kinv, add_ones(pts).T).T[:, 0:2]
+
+    def undistort_points(self, pts):
+        if self.is_distorted:
+            #uvs_undistorted = cv2.undistortPoints(np.expand_dims(uvs, axis=1), self.K, self.D, None, self.K)   # =>  Error: while undistorting the points error: (-215:Assertion failed) src.isContinuous() 
+            uvs_contiguous = np.ascontiguousarray(pts[:, :2]).reshape((pts.shape[0], 1, 2))
+            uvs_undistorted = cv2.undistortPoints(uvs_contiguous, self.K, self.D, None, self.K)            
+            return uvs_undistorted.ravel().reshape(uvs_undistorted.shape[0], 2)
+        else:
+            return pts 
