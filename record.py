@@ -40,28 +40,44 @@ RUNNING = False
 
 class Recorder:
     def __init__(self):
+        self.car = init_bot()
+        self.kb = KeyboardInput()
         self.left_camera = StereoCamera(0).start()
         self.right_camera = StereoCamera(1).start()
         self.lidar = Lidar2D()
+        self.frames_without_controls = 0
+
         signal.signal(signal.SIGINT, signal_handler)
 
     def start(self):
+        global RUNNING
+
         if RUNNING:
-            print('Control loop is already running')
+            print("Already running!")
             return
 
         self.start_time = time.time()
-        self.run_path = "slam_bot_nano/data/runs/%s" % str(start_time)
+        self.run_path = "slam_bot_nano/data/runs/%s" % str(self.start_time)
         mkdir_p(self.run_path)
 
         RUNNING = True
 
+        self.controls_thread = threading.Thread(target=self.get_controls, daemon=True)
+        self.controls_thread.start()
+
+        self.record_thread = threading.Thread(target=self.record_data, daemon=True)
+        self.record_thread.start()
+
+        self.controls_thread.join()
+        self.record_thread.join()
+        
+    def record_data(self):
         while RUNNING:
             elapsed_time = time.time() - self.start_time
 
             lidar_grabbed, angle, ran, intensity = self.lidar.get_points()                
-            left_grabbed, left_frame = left_camera.read()
-            right_grabbed, right_frame = right_camera.read()
+            left_grabbed, left_frame = self.left_camera.read()
+            right_grabbed, right_frame = self.right_camera.read()
 
             if left_grabbed and right_grabbed and lidar_grabbed:
                 data_path = os.path.join(self.run_path, str(elapsed_time))
@@ -74,9 +90,44 @@ class Recorder:
                 cv2.imwrite(os.path.join(data_path, 'right_frame.jpg'), right_frame)
                 np.savez(os.path.join(data_path, 'lidar.npz'), angle=angle, ran=ran, intensity=intensity) 
 
+    def get_controls(self):
+        global RUNNING
+        
+        c = 'r'
+        while RUNNING and c != 'q':
+            try:            
+                c = self.kb.getch()
+
+                if c:
+                    self.frames_without_controls = 0
+
+                    if c == 'd':
+                        self.car.right()
+                    elif c == 'a':
+                        self.car.left()
+                    elif c == 'w':
+                        self.car.forward()
+                        self.car.straight()
+                    elif c == 's':
+                        self.car.backward()
+                        self.car.straight()
+                    elif c == 'b':
+                        self.car.brake()
+                else:
+                    self.frames_without_controls += 1
+
+                    if self.frames_without_controls > 500000:
+                        self.car.straight()
+                        self.car.brake()
+            except IOError:
+                self.car.straight()
+                self.car.brake()
+
+        RUNNING = False
+
 class Replay:
     def __init__(self, data_path):
-        self.subfolders = sorted([f.path for f in os.scandir(folder) if f.is_dir()], key=lambda k: int(k)]
+        self.subfolders = sorted([f.path for f in os.scandir(folder) if f.is_dir()], key=lambda k: float(k))
         self.idx = 0
 
     def __next__(self):
@@ -94,3 +145,7 @@ class Replay:
         self.idx += 1
 
         return (left_frame, right_frame), (angle, ran, intensity)
+
+if __name__ == "__main__":
+    cl = Recorder()
+    cl.start()

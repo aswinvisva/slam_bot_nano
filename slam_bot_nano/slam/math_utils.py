@@ -22,7 +22,15 @@ def drawFeatureTracks(img, kps_ref, kps_cur, mask_match):
         else:
             num_outliers+=1
     
-    return draw_img 
+    return draw_img
+
+def drawMatches(img_ref, kps_ref, img_cur, kps_cur, matches):
+    print([idx2[i] == matches[i].trainIdx for i in range(len(idx1))])
+    print([idx1[i] == matches[i].queryIdx for i in range(len(idx1))])
+
+    matched_image = cv2.drawMatches(img_ref,kps_ref,img_cur,kps_cur,matches[:10],None,flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    
+    return matched_image
 
 def computeFundamentalMatrix(kps_ref, kps_cur, kRansacThresholdPixels = 0.1, kRansacProb = 0.999):
     F, mask = cv2.findFundamentalMat(kps_ref, kps_cur, cv2.FM_RANSAC)
@@ -35,15 +43,21 @@ def computeFundamentalMatrix(kps_ref, kps_cur, kRansacThresholdPixels = 0.1, kRa
     return np.matrix(F), mask 	
 
 def estimatePose(
-    self, 
-    kps_ref, 
-    kps_cur, 
+    ref_frame, 
+    cur_frame,
+    idxs_ref,
+    idxs_cur, 
     cam, 
     kUseEssentialMatrixEstimation=False, 
     kRansacProb = 0.999,
     kRansacThresholdNormalized = 0.0003,
     img_ref=None,
-    img_cur=None):	
+    img_cur=None,
+    draw_tracks=False,
+    matches=None):
+
+    kps_ref = np.asarray(ref_frame.kp[idxs_ref])
+    kps_cur = np.asarray(cur_frame.kp[idxs_cur])	
 
     if len(kps_ref) == 0 or len(kps_cur) == 0:
         return None, None, None
@@ -75,7 +89,10 @@ def estimatePose(
         img_ref.img = np.array(img_ref.img)
         img_cur.img = np.array(img_cur.img)
 
-        matched_image = drawFeatureTracks(img_cur.img, kps_ref, kps_cur, mask_match)
+        if draw_tracks:
+            matched_image = drawFeatureTracks(img_cur.img, kps_ref, kps_cur, mask_match)
+        else:
+            matched_image = drawMatches(img_ref.img, ref_frame.cv_kp[idxs_ref], img_cur.img, cur_frame.cv_kp[idxs_cur], matches)
 
     _, R, t, mask = cv2.recoverPose(E, kp_ref, kp_cur, focal=1, pp=(0., 0.))   
 
