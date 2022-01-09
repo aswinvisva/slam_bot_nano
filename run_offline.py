@@ -7,19 +7,22 @@ import termios, fcntl, sys, os
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
-plt.switch_backend('agg')
+# plt.switch_backend('agg')
+plt.switch_backend('TkAgg')
 
 from slam_bot_nano.sensors.stereo_camera import * 
 from slam_bot_nano.slam.camera_frame import CameraFrame, ORBFeatureExtractor
 from slam_bot_nano.slam.math_utils import *
+from display import Mplot3d
 
 RMAX = 32.0
 
 
 class Replay:
-    def __init__(self, data_path):
+    def __init__(self, data_path, skip_every=1):
         self.subfolders = sorted([f.path for f in os.scandir(data_path) if f.is_dir()], key=lambda k: float(os.path.basename(k)))
         self.idx = 0
+        self.skip_every=skip_every
 
     def __iter__(self):
         return self
@@ -36,7 +39,7 @@ class Replay:
             ran = data['ran']
             intensity = data['intensity']
 
-        self.idx += 1
+        self.idx += self.skip_every
 
         return (left_frame, right_frame), (angle, ran, intensity)
 
@@ -49,6 +52,8 @@ class ControlLoop:
 
         self.left_camera = StereoCamera(0)
         self.right_camera = StereoCamera(1)
+
+        self.plt3d = Mplot3d(title='3D trajectory')
 
         self.lidar_frame = None
 
@@ -85,7 +90,7 @@ class ControlLoop:
             self.left_frame = left_frame
             self.right_frame = right_frame
 
-            frame = CameraFrame(self.left_frame, self.feature_extractor)
+            frame = CameraFrame(self.right_frame, self.feature_extractor)
             self.cur_frame = frame
 
             self.fig.canvas.draw()
@@ -126,7 +131,7 @@ class ControlLoop:
 
         if (self.t0_est is not None):             
             p = [self.cur_t[0]-self.t0_est[0], self.cur_t[1]-self.t0_est[1], self.cur_t[2]-self.t0_est[2]]   # the estimated traj starts at 0
-            self.traj3d_est.append(self.cur_t)
+            self.traj3d_est.append(p)
             self.poses.append(poseRt(self.cur_R, p))   
 
             traj3d_est_np = np.array(self.traj3d_est)
@@ -138,6 +143,8 @@ class ControlLoop:
             self.trajectory_image = trajectory_image.reshape(self.trajectory_fig.canvas.get_width_height()[::-1] + (3,))
 
             self.trajectory_image = cv2.resize(self.trajectory_image, (shape[1], shape[0])) 
+            self.plt3d.drawTraj(self.traj3d_est,'estimated',color='g',marker='.')
+            self.plt3d.refresh()
 
     def display_info(self):
         if self.matched_image is None or self.trajectory_image is None:
