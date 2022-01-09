@@ -5,9 +5,10 @@ import cv2
 
 class ORBFeatureExtractor:
 
-    def __init__(self):
+    def __init__(self, use_ratio_test=True):
         self.extractor = cv2.ORB_create()
         self.matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+        self.use_ratio_test = use_ratio_test
     
     def extract(self, img):
         kp, des = self.extractor.detectAndCompute(img,None)
@@ -18,10 +19,16 @@ class ORBFeatureExtractor:
         
         if des1 is None or des2 is None:
             return []
-    
-        matches = self.matcher.knnMatch(des1, des2, k=2)
 
-        return self.goodMatchesOneToOne(matches, des1, des2)
+        if self.use_ratio_test:
+            matches = self.matcher.knnMatch(des1, des2, k=2)
+            idx1, idx2, matches = self.goodMatchesOneToOne(matches, des1, des2)
+            return idx1, idx2, matches
+        else:
+            matches = self.matcher.match(des1,des2)
+            idx1 = [matches[i].queryIdx for i in range(len(matches))]
+            idx2 = [matches[i].trainIdx for i in range(len(matches))]
+            return idx1, idx2, matches
 
     # input: des1 = query-descriptors, des2 = train-descriptors
     # output: idx1, idx2  (vectors of corresponding indexes in des1 and des2, respectively)
@@ -68,7 +75,7 @@ class CameraFrame:
         self.feature_extractor = feature_extractor
         self._kp_original, self._des = self.feature_extractor.extract(img)
         self._kp = np.array([x.pt for x in self._kp_original], dtype=np.float32)
-        self._kp_original = np.array([x for x in self._kp_original])
+        self._kp_original_np = np.array([x for x in self._kp_original])
 
         self._pose = None
         self.img = img
@@ -78,8 +85,12 @@ class CameraFrame:
         return self._kp
 
     @property
+    def cv_kp_np(self):
+        return self._kp_original_np
+
+    @property
     def cv_kp(self):
-        return self._kp_original
+        return self._kp_original_np
 
     @property
     def des(self):

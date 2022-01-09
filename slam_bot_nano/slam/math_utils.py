@@ -25,10 +25,8 @@ def drawFeatureTracks(img, kps_ref, kps_cur, mask_match):
     return draw_img
 
 def drawMatches(img_ref, kps_ref, img_cur, kps_cur, matches):
-    print([idx2[i] == matches[i].trainIdx for i in range(len(idx1))])
-    print([idx1[i] == matches[i].queryIdx for i in range(len(idx1))])
+    matched_image = cv2.drawMatches(img_ref,kps_ref,img_cur,kps_cur,matches,None,flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
 
-    matched_image = cv2.drawMatches(img_ref,kps_ref,img_cur,kps_cur,matches[:10],None,flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
     
     return matched_image
 
@@ -51,8 +49,6 @@ def estimatePose(
     kUseEssentialMatrixEstimation=False, 
     kRansacProb = 0.999,
     kRansacThresholdNormalized = 0.0003,
-    img_ref=None,
-    img_cur=None,
     draw_tracks=False,
     matches=None):
 
@@ -85,14 +81,13 @@ def estimatePose(
     
     matched_image = None
 
-    if img_ref is not None and img_cur is not None:
-        img_ref.img = np.array(img_ref.img)
-        img_cur.img = np.array(img_cur.img)
+    ref_frame.img = np.array(ref_frame.img)
+    cur_frame.img = np.array(cur_frame.img)
 
-        if draw_tracks:
-            matched_image = drawFeatureTracks(img_cur.img, kps_ref, kps_cur, mask_match)
-        else:
-            matched_image = drawMatches(img_ref.img, ref_frame.cv_kp[idxs_ref], img_cur.img, cur_frame.cv_kp[idxs_cur], matches)
+    if draw_tracks:
+        matched_image = drawFeatureTracks(cur_frame.img, kps_ref, kps_cur, mask_match)
+    else:
+        matched_image = drawMatches(ref_frame.img, ref_frame.cv_kp, cur_frame.img, cur_frame.cv_kp, matches)
 
     _, R, t, mask = cv2.recoverPose(E, kp_ref, kp_cur, focal=1, pp=(0., 0.))   
 

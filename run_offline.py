@@ -3,24 +3,42 @@ import curses
 import sys
 import threading
 
-from adafruit_servokit import ServoKit
 import termios, fcntl, sys, os
-from jetracer.nvidia_racecar import NvidiaRacecar
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
 
-from slam_bot_nano.vehicle.utils import init_bot
-from slam_bot_nano.controls.keyboard_input import KeyboardInput
-from slam_bot_nano.sensors.stereo_camera import StereoCamera
-from slam_bot_nano.sensors.lidar import Lidar2D
-from slam_bot_nano.client_server_com.image_transfer_service import ImageTransferClient
+from slam_bot_nano.sensors.stereo_camera import * 
 from slam_bot_nano.slam.camera_frame import CameraFrame, ORBFeatureExtractor
 from slam_bot_nano.slam.math_utils import *
-from record import *
 
 RMAX = 32.0
+
+
+class Replay:
+    def __init__(self, data_path):
+        self.subfolders = sorted([f.path for f in os.scandir(data_path) if f.is_dir()], key=lambda k: float(os.path.basename(k)))
+        self.idx = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.idx >= len(self.subfolders):
+            raise StopIteration
+        
+        data_dir = self.subfolders[self.idx]
+        left_frame = cv2.imread(os.path.join(data_dir, 'left_frame.jpg'))
+        right_frame = cv2.imread(os.path.join(data_dir, 'right_frame.jpg'))
+        with np.load(os.path.join(data_dir, 'lidar.npz')) as data:
+            angle = data['angle']
+            ran = data['ran']
+            intensity = data['intensity']
+
+        self.idx += 1
+
+        return (left_frame, right_frame), (angle, ran, intensity)
 
 class ControlLoop:
     def __init__(self, path):
@@ -28,6 +46,9 @@ class ControlLoop:
 
         self.left_grabbed, self.right_grabbed, self.lidar_grabbed = False, False, False
         self.left_frame, self.right_frame = None, None
+
+        self.left_camera = StereoCamera(0)
+        self.right_camera = StereoCamera(1)
 
         self.lidar_frame = None
 
@@ -58,8 +79,6 @@ class ControlLoop:
 
         self.feature_extractor = ORBFeatureExtractor()
 
-        print("Init finished!")
-
     def start(self):
         for (left_frame, right_frame), (angle, ran, intensity) in self.replay:
             self.prev_frame = self.cur_frame
@@ -86,12 +105,9 @@ class ControlLoop:
         if prev_frame is None:
             self.t0_est = np.array([self.cur_t[0], self.cur_t[1], self.cur_t[2]])  # starting translation 
         else:
-            idxs_ref, idxs_cur = self.feature_extractor.match(prev_frame, cur_frame)
+            idxs_ref, idxs_cur, matches = self.feature_extractor.match(prev_frame, cur_frame)
 
-            kps_ref = np.asarray(prev_frame.kp[idxs_ref])
-            kps_cur = np.asarray(cur_frame.kp[idxs_cur])
-
-            R, t, self.matched_image = estimatePose(self, kps_ref, kps_cur, self.left_camera, img_ref=prev_frame, img_cur=cur_frame)
+            R, t, self.matched_image = estimatePose(prev_frame, cur_frame, idxs_ref, idxs_cur, self.left_camera, matches=matches)
 
             print("New controls")
 
@@ -115,9 +131,6 @@ class ControlLoop:
 
             traj3d_est_np = np.array(self.traj3d_est)
 
-            print(self.cur_t)
-            print(">"*10)
-
             self.trajectory_fig.canvas.draw()
             self.trajectory_sublot.clear()
             self.trajectory_sublot.scatter(traj3d_est_np[:, 0], traj3d_est_np[:, 1])
@@ -127,17 +140,16 @@ class ControlLoop:
             self.trajectory_image = cv2.resize(self.trajectory_image, (shape[1], shape[0])) 
 
     def display_info(self):
-        if self.left_grabbed and self.right_grabbed and self.lidar_grabbed:
-            if self.matched_image is None or self.trajectory_image is None:
-                images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
-            else:
-                images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
-                tmp = np.hstack((self.matched_image, self.trajectory_image))
-                images = np.vstack((images, tmp))
-            
-            cv2.imshow("Camera Images", images)
-            cv2.waitKey(1)
+        if self.matched_image is None or self.trajectory_image is None:
+            images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
+        else:
+            images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
+            tmp = np.hstack((self.matched_image, self.trajectory_image))
+            images = np.vstack((images, tmp))
+        
+        cv2.imshow("Camera Images", images)
+        cv2.waitKey(100)
 
 if __name__ == "__main__":
-    cl = ControlLoop()
+    cl = ControlLoop("slam_bot_nano/data/runs/home_session")
     cl.start()

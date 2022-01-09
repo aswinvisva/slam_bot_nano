@@ -125,27 +125,6 @@ class Recorder:
 
         RUNNING = False
 
-class Replay:
-    def __init__(self, data_path):
-        self.subfolders = sorted([f.path for f in os.scandir(folder) if f.is_dir()], key=lambda k: float(k))
-        self.idx = 0
-
-    def __next__(self):
-        if self.idx >= len(self.subfolders):
-            raise StopIteration
-        
-        data_dir = self.subfolders[self.idx]
-        left_frame = cv2.imread(os.path.join(data_dir, 'left_frame.jpg'))
-        right_frame = cv2.imread(os.path.join(data_dir, 'right_frame.jpg'))
-        with np.load(os.path.join(data_dir, 'lidar.npz')) as data:
-            angle = data['angle']
-            ran = data['ran']
-            intensity = data['intensity']
-
-        self.idx += 1
-
-        return (left_frame, right_frame), (angle, ran, intensity)
-
 if __name__ == "__main__":
     cl = Recorder()
     cl.start()
