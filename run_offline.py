@@ -103,27 +103,31 @@ class ControlLoop:
             self.process_data()
             self.display_info()
 
+        self.plt3d.quit()
+
     def process_data(self):
         prev_frame, cur_frame = self.prev_frame, self.cur_frame
         shape = self.frame_shape
+
+        self.depth_img = get_depth_est(self.left_frame, self.right_frame)
 
         if prev_frame is None:
             self.t0_est = np.array([self.cur_t[0], self.cur_t[1], self.cur_t[2]])  # starting translation 
         else:
             idxs_ref, idxs_cur, matches = self.feature_extractor.match(prev_frame, cur_frame)
 
-            R, t, self.matched_image = estimatePose(prev_frame, cur_frame, idxs_ref, idxs_cur, self.left_camera, matches=matches)
-
-            print("New controls")
-
-            print("="*10)
-            print(R)
-            print("="*10)
-            print(t)
-            print("="*10)
+            R, t, self.matched_image, self.quiver_image = estimatePose(prev_frame, 
+                cur_frame, 
+                idxs_ref, 
+                idxs_cur, 
+                self.left_camera,
+                matches=matches,
+                R_i=self.cur_R.copy(),
+                t_i=self.cur_t.copy())
             
             if self.matched_image is not None and self.matched_image.size > 0:
-                self.matched_image = cv2.resize(self.matched_image, (shape[1] * 2, shape[0])) 
+                self.matched_image = cv2.resize(self.matched_image, (shape[1], shape[0])) 
+                self.quiver_image = cv2.resize(self.quiver_image, (shape[1], shape[0])) 
 
             if R is not None and t is not None:
                 self.cur_t = self.cur_t + self.cur_R.dot(t) 
@@ -134,28 +138,19 @@ class ControlLoop:
             self.traj3d_est.append(p)
             self.poses.append(poseRt(self.cur_R, p))   
 
-            traj3d_est_np = np.array(self.traj3d_est)
-
-            self.trajectory_fig.canvas.draw()
-            self.trajectory_sublot.clear()
-            self.trajectory_sublot.scatter(traj3d_est_np[:, 0], traj3d_est_np[:, 1])
-            trajectory_image = np.frombuffer(self.trajectory_fig.canvas.tostring_rgb(), dtype='uint8')
-            self.trajectory_image = trajectory_image.reshape(self.trajectory_fig.canvas.get_width_height()[::-1] + (3,))
-
-            self.trajectory_image = cv2.resize(self.trajectory_image, (shape[1], shape[0])) 
             self.plt3d.drawTraj(self.traj3d_est,'estimated',color='g',marker='.')
             self.plt3d.refresh()
 
     def display_info(self):
-        if self.matched_image is None or self.trajectory_image is None:
+        if self.matched_image is None or self.depth_img is None:
             images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
         else:
             images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
-            tmp = np.hstack((self.matched_image, self.trajectory_image))
+            tmp = np.hstack((self.matched_image, self.quiver_image, self.depth_img))
             images = np.vstack((images, tmp))
         
         cv2.imshow("Camera Images", images)
-        cv2.waitKey(100)
+        cv2.waitKey(50)
 
 if __name__ == "__main__":
     cl = ControlLoop("slam_bot_nano/data/runs/home_session")
