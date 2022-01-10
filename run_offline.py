@@ -128,6 +128,7 @@ class ControlLoop:
             if self.matched_image is not None and self.matched_image.size > 0:
                 self.matched_image = cv2.resize(self.matched_image, (shape[1], shape[0])) 
                 self.quiver_image = cv2.resize(self.quiver_image, (shape[1], shape[0])) 
+            self.depth_img = cv2.resize(self.depth_img, (shape[1], shape[0])) 
 
             if R is not None and t is not None:
                 self.cur_t = self.cur_t + self.cur_R.dot(t) 
