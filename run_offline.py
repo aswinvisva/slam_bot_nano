@@ -143,10 +143,6 @@ class ControlLoop:
             self.depth_img = cv2.resize(self.depth_img, (shape[1], shape[0]))
 
             if R is not None and t is not None:
-                # H_t = np.eye(3,3)
-                # H_t[:2, :3] = H
-                # print(H_t.shape, self.cur_t.shape)
-                # self.cur_t = H_t @ self.cur_t
                 self.cur_t = self.cur_t + self.cur_R.dot(t)
                 self.cur_R = self.cur_R.dot(R)
 
@@ -154,20 +150,16 @@ class ControlLoop:
             p = [self.cur_t[0]-self.t0_est[0], self.cur_t[1]-self.t0_est[1], 0]   # the estimated traj starts at 0
 
             self.traj3d_est.append(self.cur_t)
-            # self.poses.append(poseRt(self.cur_R, p))
-
             self.plt3d.drawTraj(self.traj3d_est,'estimated',color='g',marker='.')
             self.plt3d.refresh()
 
-            print(np.array(self.traj3d_est)[:,0])
-
             self.trajectory_fig.canvas.draw()
             self.trajectory_sublot.clear()
-            self.trajectory_sublot.scatter(np.array(self.traj3d_est)[:, 0], np.array(self.traj3d_est)[:, 1], cmap='hsv', alpha=0.95)
+            self.trajectory_sublot.scatter(np.array(self.traj3d_est)[:, 0], np.array(self.traj3d_est)[:, 1], c=[idx/len(self.traj3d_est) for idx in range(len(self.traj3d_est))],cmap='Blues', alpha=0.95)
             trajectory_frame = np.frombuffer(self.trajectory_fig.canvas.tostring_rgb(), dtype='uint8')
             self.trajectory_frame = trajectory_frame.reshape(self.trajectory_fig.canvas.get_width_height()[::-1] + (3,))
             self.trajectory_frame = cv2.resize(self.trajectory_frame, (self.frame_shape[1], self.frame_shape[0]))
-            cv2.imshow("ASDA", self.trajectory_frame)
+            cv2.imshow("Trajectory", self.trajectory_frame)
             cv2.waitKey(1)
 
     def display_info(self):
