@@ -3,8 +3,8 @@ import numpy as np
 import threading
 
 FILE_NAMES = {
-    0: "/home/aswin/slam_bot_nano/slam_bot_nano/data/calib_left.npz", 
-    1: "/home/aswin/slam_bot_nano/slam_bot_nano/data/calib_right.npz"
+    0: "slam_bot_nano/data/calib_left.npz",
+    1: "slam_bot_nano/data/calib_right.npz"
 }
 
 class StereoCamera:
@@ -129,9 +129,9 @@ class StereoCamera:
         )
 
     def project(self, xcs):
-        projs = self.K @ xcs.T     
-        zs = projs[-1]      
-        projs = projs[:2]/ zs   
+        projs = self.K @ xcs.T
+        zs = projs[-1]
+        projs = projs[:2]/ zs
         return projs.T, zs
 
     def unproject_points(self, pts):
@@ -141,14 +141,14 @@ class StereoCamera:
                 return add_ones_1D(x)
             else:
                 return np.concatenate([x, np.ones((x.shape[0], 1))], axis=1)
-        
+
         return np.dot(self.Kinv, add_ones(pts).T).T[:, 0:2]
 
     def undistort_points(self, pts):
         if self.is_distorted:
-            #uvs_undistorted = cv2.undistortPoints(np.expand_dims(uvs, axis=1), self.K, self.D, None, self.K)   # =>  Error: while undistorting the points error: (-215:Assertion failed) src.isContinuous() 
+            #uvs_undistorted = cv2.undistortPoints(np.expand_dims(uvs, axis=1), self.K, self.D, None, self.K)   # =>  Error: while undistorting the points error: (-215:Assertion failed) src.isContinuous()
             uvs_contiguous = np.ascontiguousarray(pts[:, :2]).reshape((pts.shape[0], 1, 2))
-            uvs_undistorted = cv2.undistortPoints(uvs_contiguous, self.K, self.D, None, self.K)            
+            uvs_undistorted = cv2.undistortPoints(uvs_contiguous, self.K, self.D, None, self.K)
             return uvs_undistorted.ravel().reshape(uvs_undistorted.shape[0], 2)
         else:
-            return pts 
+            return pts
