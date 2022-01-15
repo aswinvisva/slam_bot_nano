@@ -73,10 +73,13 @@ class ControlLoop:
         self.t0_est = None 
         self.traj3d_est = [] 
         self.poses = []
-        self.cur_R = np.eye(3,3) # current rotation 
+        self.cur_R = np.eye(2,2) # current rotation 
         self.cur_t = np.zeros((3,1)) # current translation 
+        self.prev_pos = np.zeros((2,1))
         self.prev_frame = None
         self.cur_frame = None
+        self.prev_lidar_frame = None
+        self.cur_lidar_frame = None
         self.matched_image = None
         self.trajectory_image = None
 
@@ -87,15 +90,19 @@ class ControlLoop:
     def start(self):
         for (left_frame, right_frame), (angle, ran, intensity) in self.replay:
             self.prev_frame = self.cur_frame
+            self.prev_lidar_frame = self.cur_lidar_frame
             self.left_frame = left_frame
             self.right_frame = right_frame
 
-            frame = CameraFrame(self.right_frame, self.feature_extractor)
+            frame = CameraFrame(self.left_frame, self.feature_extractor)
             self.cur_frame = frame
+            self.cur_lidar_frame = (ran, angle)
 
             self.fig.canvas.draw()
             self.lidar_polar.clear()
             self.lidar_polar.scatter(angle, ran, c=intensity, cmap='hsv', alpha=0.95)
+            if self.prev_lidar_frame is not None:
+                self.lidar_polar.scatter(self.prev_lidar_frame[1], self.prev_lidar_frame[0], cmap='Greens', alpha=0.95)
             lidar_frame = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype='uint8')
             self.lidar_frame = lidar_frame.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
             self.lidar_frame = cv2.resize(self.lidar_frame, (self.frame_shape[1], self.frame_shape[0])) 
@@ -112,7 +119,8 @@ class ControlLoop:
         self.depth_img = get_depth_est(self.left_frame, self.right_frame)
 
         if prev_frame is None:
-            self.t0_est = np.array([self.cur_t[0], self.cur_t[1], self.cur_t[2]])  # starting translation 
+            self.t0_est = np.array([self.cur_t[0], self.cur_t[1]])  # starting translation 
+            self.prev_pos = np.array([self.cur_t[0], self.cur_t[1]])
         else:
             idxs_ref, idxs_cur, matches = self.feature_extractor.match(prev_frame, cur_frame)
 
@@ -124,6 +132,8 @@ class ControlLoop:
                 matches=matches,
                 R_i=self.cur_R.copy(),
                 t_i=self.cur_t.copy())
+
+            H = lidar_localization(self.prev_lidar_frame, self.cur_lidar_frame)
             
             if self.matched_image is not None and self.matched_image.size > 0:
                 self.matched_image = cv2.resize(self.matched_image, (shape[1], shape[0])) 
@@ -131,13 +141,17 @@ class ControlLoop:
             self.depth_img = cv2.resize(self.depth_img, (shape[1], shape[0])) 
 
             if R is not None and t is not None:
-                self.cur_t = self.cur_t + self.cur_R.dot(t) 
-                self.cur_R = self.cur_R.dot(R)
+                H_t = np.eye(3,3)
+                H_t[:2, :3] = H
+                print(H_t.shape, self.cur_t.shape)
+                self.cur_t = H_t @ self.cur_t
+                # self.cur_t = self.cur_t + self.cur_R.dot(t) 
+                # self.cur_R = self.cur_R.dot(R)
 
         if (self.t0_est is not None):             
-            p = [self.cur_t[0]-self.t0_est[0], self.cur_t[1]-self.t0_est[1], self.cur_t[2]-self.t0_est[2]]   # the estimated traj starts at 0
+            p = [self.cur_t[0]-self.t0_est[0], self.cur_t[1]-self.t0_est[1], 0]   # the estimated traj starts at 0
             self.traj3d_est.append(p)
-            self.poses.append(poseRt(self.cur_R, p))   
+            # self.poses.append(poseRt(self.cur_R, p))   
 
             self.plt3d.drawTraj(self.traj3d_est,'estimated',color='g',marker='.')
             self.plt3d.refresh()
