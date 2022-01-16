@@ -34,6 +34,30 @@ class StereoCamera:
 
         self.is_distorted = np.linalg.norm(self.D) > 1e-10
 
+    @property
+    def cx(self):
+        return self.K[0, 2]
+
+    @property
+    def cy(self):
+        return self.K[1, 2]
+
+    @property
+    def fx(self):
+        return self.K[0, 0]
+
+    @property
+    def fy(self):
+        return self.K[1, 1]
+
+    @property
+    def height(self):
+        return 360
+
+    @property
+    def width(self):
+        return 640
+
     #Opening the cameras
     def open(self, gstreamer_pipeline_string):
         gstreamer_pipeline_string = self.gstreamer_pipeline()
