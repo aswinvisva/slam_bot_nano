@@ -70,11 +70,19 @@ class ControlLoop:
         self.trajectory_sublot.autoscale_view(True,True,True)
         self.trajectory_sublot.grid(True)
 
+        self.map_fig = plt.figure()
+        self.map_fig.canvas.set_window_title('2D Map')
+        self.map_sublot = plt.subplot()
+        self.map_sublot.autoscale_view(True,True,True)
+        self.map_sublot.grid(True)
+
         self.t0_est = None
         self.traj3d_est = []
         self.poses = []
         self.cur_R = np.eye(3,3) # current rotation
         self.cur_t = np.zeros((3,1)) # current translation
+        self.cum_R_inv = np.eye(3,3)
+        self.cum_t_inv = np.zeros((3,1))
         self.prev_pos = np.zeros((3,1))
         self.prev_frame = None
         self.cur_frame = None
@@ -86,6 +94,8 @@ class ControlLoop:
         self.frame_shape = (360, 640, 3)
 
         self.feature_extractor = ORBFeatureExtractor()
+
+        self.map = []
 
     def start(self):
         for (left_frame, right_frame), (angle, ran, intensity) in self.replay:
@@ -117,6 +127,7 @@ class ControlLoop:
         shape = self.frame_shape
 
         self.depth_img = get_depth_est(self.left_frame, self.right_frame)
+        self.depth_img = cv2.resize(self.depth_img, (shape[1], shape[0]))
 
         if prev_frame is None:
             self.t0_est = np.array([self.cur_t[0], self.cur_t[1]])  # starting translation
@@ -133,14 +144,17 @@ class ControlLoop:
                 R_i=self.cur_R.copy(),
                 t_i=self.cur_t.copy())
 
-            R, t = lidar_localization(self.prev_lidar_frame, self.cur_lidar_frame)
-
-            t = t.reshape((3,1))
+            R, t = lidar_localization(
+                self.prev_lidar_frame,
+                self.cur_lidar_frame,
+                self.map,
+                cum_R=self.cur_R,
+                cum_t=self.cur_t
+            )
 
             if self.matched_image is not None and self.matched_image.size > 0:
                 self.matched_image = cv2.resize(self.matched_image, (shape[1], shape[0]))
                 self.quiver_image = cv2.resize(self.quiver_image, (shape[1], shape[0]))
-            self.depth_img = cv2.resize(self.depth_img, (shape[1], shape[0]))
 
             if R is not None and t is not None:
                 self.cur_t = self.cur_t + self.cur_R.dot(t)
@@ -159,16 +173,34 @@ class ControlLoop:
             trajectory_frame = np.frombuffer(self.trajectory_fig.canvas.tostring_rgb(), dtype='uint8')
             self.trajectory_frame = trajectory_frame.reshape(self.trajectory_fig.canvas.get_width_height()[::-1] + (3,))
             self.trajectory_frame = cv2.resize(self.trajectory_frame, (self.frame_shape[1], self.frame_shape[0]))
-            cv2.imshow("Trajectory", self.trajectory_frame)
+
+        if len(self.map) > 0:
+            print(np.array(self.map).shape)
+
+            self.map_fig.canvas.draw()
+            self.map_sublot.clear()
+            self.map_sublot.scatter(np.array(self.map)[:, 0], np.array(self.map)[:, 1], cmap='Blues', alpha=0.95)
+            map_frame = np.frombuffer(self.map_fig.canvas.tostring_rgb(), dtype='uint8')
+            self.map_frame = map_frame.reshape(self.map_fig.canvas.get_width_height()[::-1] + (3,))
+            self.map_frame = cv2.resize(self.map_frame, (self.frame_shape[1], self.frame_shape[0]))
+
+            cv2.imshow("ASDA", self.map_frame)
             cv2.waitKey(1)
 
     def display_info(self):
-        if self.matched_image is None or self.depth_img is None:
-            images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
-        else:
-            images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
-            tmp = np.hstack((self.matched_image, self.quiver_image, self.depth_img))
-            images = np.vstack((images, tmp))
+
+        if self.matched_image is None:
+            self.matched_image = np.zeros(self.frame_shape, dtype=np.uint8)
+
+        if self.depth_img is None:
+            self.depth_img = np.zeros(self.frame_shape, dtype=np.uint8)
+
+        if self.trajectory_frame is None:
+            self.trajectory_frame = np.zeros(self.frame_shape, dtype=np.uint8)
+
+        images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
+        tmp = np.hstack((self.matched_image, self.trajectory_frame, self.depth_img))
+        images = np.vstack((images, tmp))
 
         cv2.imshow("Camera Images", images)
         cv2.waitKey(1)

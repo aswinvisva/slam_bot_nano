@@ -429,7 +429,7 @@ def ICP(data,ref,method, exclusion_radius = 0.5, sampling_limit = None, verbose 
             rms = new_rms
             cpt = cpt+1
 
-    return R,T, rms_list
+    return R,T, indexes_d, indexes_r
 
 
 class Intrinsics:
@@ -633,7 +633,7 @@ def compute_pose_2d2d(kp_ref, kp_cur, K, valid_cfg="flow", valid_cfg_thresh=0.01
     R, t = best_Rt
     return R, t, inliers
 
-def lidar_localization(kp_ref, kp_cur, iterations=500):
+def lidar_localization(kp_ref, kp_cur, slam_map, cum_R=None, cum_t=None):
     """
     Given the map at t-1 and the map at t, compute inliers and overall trajectory in the XY plane
     """
@@ -649,37 +649,22 @@ def lidar_localization(kp_ref, kp_cur, iterations=500):
     x = Point_cloud().init_from_points(x)
     y = Point_cloud().init_from_points(y)
 
-    # cost = cdist(x, y, 'euclidean')
+    R, t, row_indices, col_indices = ICP(x, y, "point2point")
+    t = t.reshape((3,1))
 
-    # row_ind, col_ind = linear_sum_assignment(cost)
+    cum_t = cum_t + cum_R.dot(t)
+    cum_R = cum_R.dot(R)
 
-    # print(x[row_ind].shape, y[col_ind].shape)
+    cum_t = t.reshape((3,))
 
-    # print("Total matching cost: %d" % cost[row_ind, col_ind].sum())
+    Rt = poseRt(cum_R, cum_t)
+    Rt_inv = np.linalg.inv(Rt)
+    R_inv, t_inv = Rtpose(Rt_inv)
 
-
-
-    # R, t = rigid_transform_3D(x[row_ind].T, y[col_ind].T)
-
-    # min_cost = float("inf")
-    # best_transformation = None
-    # min_sample_size = min(len(x), len(y))
-    # for i in range(iterations):
-
-    #     row_ind = np.random.choice(np.arange(len(x)), min_sample_size)
-    #     col_ind = np.random.choice(np.arange(len(y)), min_sample_size)
-
-    #     # transformation_history, points = icp(x[row_ind], y[col_ind])
-
-    #     R, t, cost = rigid_transform_3D(x[row_ind].T, y[col_ind].T)
-
-    #     if cost < min_cost:
-    #         min_cost = cost
-    #         best_transformation = R, t
-
-    # print("Min cost: %s" % min_cost)
-
-    R, t, _ = ICP(x, y, "point2point")
+    transformed_point_cloud = Point_cloud()
+    transformed_point_cloud.init_from_transfo(y, R=R_inv, t=t_inv)
+    points = transformed_point_cloud.points.tolist()
+    slam_map.extend(points)
 
     return R, t
 
@@ -737,6 +722,11 @@ def poseRt(R, t):
     ret[:3, :3] = R
     ret[:3, 3] = t
     return ret
+
+def Rtpose(Rt):
+    R = Rt[:3, :3]
+    t = Rt[:3, 3]
+    return R, t
 
 def drawFeatureTracks(img, kps_ref, kps_cur, mask_match):
     draw_img = img
