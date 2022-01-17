@@ -20,6 +20,7 @@ from slam_bot_nano.slam.math_utils import *
 STAGE_FIRST_FRAME = 0
 STAGE_DEFAULT_FRAME = 1
 
+
 class LidarOdometry:
     def __init__(self):
         self.cur_R = np.eye(3,3) # current rotation
@@ -229,7 +230,7 @@ def elementary_rot_mat(theta):
 
     return R_x, R_y, R_z
 
-def best_transform(data, ref, method = "point2point", indexes_d = None, indexes_r = None, verbose = True):
+def best_transform(data, ref, method = "point2point", indexes_d = None, indexes_r = None, verbose = False):
     """
     Returns the best transformation computed for the two aligned point clouds
     params:
@@ -354,7 +355,7 @@ def grad_loss(x,a,b,M):
     g[3:] = np.sum(grad_R[None,:,:] * grad_R_euler, axis = (1,2)) # chain rule
     return g
 
-def ICP(data,ref,method, exclusion_radius = 0.5, sampling_limit = None, verbose = True):
+def ICP(data,ref,method, exclusion_radius = 0.5, sampling_limit = None, verbose = False):
     """
     Full algorithm
     Aligns the two point cloud by iteratively matching the closest points
