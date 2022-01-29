@@ -5,4 +5,4 @@ sudo chmod 666 /dev/ttyUSB0
 sudo service nvargus-daemon restart
 
 # Run the script
-python3 run_online.py
+python3.8 run_online.py

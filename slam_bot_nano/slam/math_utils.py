@@ -5,8 +5,6 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import matplotlib
-from skimage.measure import ransac
-from skimage.transform import EssentialMatrixTransform
 from sklearn import linear_model, datasets
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
