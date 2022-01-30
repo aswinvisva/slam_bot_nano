@@ -21,6 +21,7 @@ from slam_bot_nano.slam.camera_frame import CameraFrame, ORBFeatureExtractor
 from slam_bot_nano.slam.math_utils import *
 from slam_bot_nano.slam.visual_odometry import VisualOdometry
 from slam_bot_nano.slam.lidar_odometry import LidarOdometry
+from slam_bot_nano.vehicle.vehicle_kinematic_model import VehicleKinematicModel
 
 
 RMAX = 32.0
@@ -71,10 +72,13 @@ class ControlLoop:
         self.matched_image = None
         self.trajectory_image = None
         self.cur_lidar_frame = None
-        self.ts = None
 
         self.vo = VisualOdometry(self.left_camera)
         self.lo = LidarOdometry()
+        self.vkm = VehicleKinematicModel()
+        self.recent_lat_control = 0
+        self.recent_long_control = 0
+        self.recent_t = None
 
         self.frame_shape = (360, 640, 3)
 
@@ -188,26 +192,33 @@ class ControlLoop:
     def get_controls(self):
         c = 'r'
         while self.running and c != 'q':
-            if self.ts is not None:
-                if abs(self.ts - time.time()) > 1.0:
-                    self.car.brake()
+            cur_t = time.time()
+            if self.recent_t is not None:
+                dt = cur_t - self.recent_t
+            else:
+                dt = None
+            self.recent_t = cur_t
+
             try:            
                 c = self.kb.getch()
-
                 if c:
                     self.frames_without_controls = 0
 
                     if c == 'd':
                         self.car.right()
+                        self.recent_lat_control = 1
                     elif c == 'a':
                         self.car.left()
+                        self.recent_lat_control = -1
                     elif c == 'w':
-                        self.ts = time.time()
                         self.car.forward()
                         self.car.straight()
+                        self.recent_lat_control = 0
+                        self.recent_long_control = 1
                     elif c == 's':
                         self.car.backward()
                         self.car.straight()
+                        self.recent_long_control = -1
                     elif c == 'b':
                         self.car.brake()
                 else:
@@ -219,6 +230,9 @@ class ControlLoop:
             except IOError:
                 self.car.straight()
                 self.car.brake()
+
+            if dt is not None:
+                self.vkm.update(dt, self.recent_lat_control, self.recent_long_control)
 
         self.running = False
 
