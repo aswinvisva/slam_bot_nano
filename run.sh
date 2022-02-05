@@ -1,3 +1,6 @@
+# Activate environment
+source env/bin/activate
+
 # Give permission to access usb port
 sudo chmod 666 /dev/ttyUSB0
 

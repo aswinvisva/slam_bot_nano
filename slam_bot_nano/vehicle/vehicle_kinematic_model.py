@@ -32,7 +32,7 @@ class VehicleKinematicModel:
         elif lat_control == 0:
             steering_angle = 0
 
-        angular_velocity = velocity * tan(steering_angle) / self.wheel_base_length
+        angular_velocity = velocity * np.tan(steering_angle) / self.wheel_base_length
         new_x = self.pos[0] + velocity * cos(self.yaw) * dt
         new_y = self.pos[1] + velocity * sin(self.yaw) * dt
         new_yaw = normalise_angle(self.yaw + angular_velocity * dt)

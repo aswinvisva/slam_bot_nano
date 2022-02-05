@@ -42,10 +42,10 @@ class Recorder:
     def __init__(self):
         self.car = init_bot()
         self.kb = KeyboardInput()
-        self.left_camera = StereoCamera(0).start()
-        self.right_camera = StereoCamera(1).start()
         self.lidar = Lidar2D()
         self.frames_without_controls = 0
+        self.most_recent_control = np.zeros((2, 1))
+        self.controls_lock = threading.Lock()
 
         signal.signal(signal.SIGINT, signal_handler)
 
@@ -62,66 +62,71 @@ class Recorder:
 
         RUNNING = True
 
-        self.controls_thread = threading.Thread(target=self.get_controls, daemon=True)
-        self.controls_thread.start()
-
         self.record_thread = threading.Thread(target=self.record_data, daemon=True)
         self.record_thread.start()
 
+        self.controls_thread = threading.Thread(target=self.get_controls, daemon=True)
+        self.controls_thread.start()
+
         self.controls_thread.join()
-        self.record_thread.join()
         
     def record_data(self):
         while RUNNING:
             elapsed_time = time.time() - self.start_time
 
-            lidar_grabbed, angle, ran, intensity = self.lidar.get_points()                
-            left_grabbed, left_frame = self.left_camera.read()
-            right_grabbed, right_frame = self.right_camera.read()
+            lidar_grabbed, angle, ran, intensity = self.lidar.get_points() 
 
-            if left_grabbed and right_grabbed and lidar_grabbed:
+            if lidar_grabbed:
                 data_path = os.path.join(self.run_path, str(elapsed_time))
                 mkdir_p(data_path)
 
-                left_frame = cv2.flip(left_frame, -1)
-                right_frame = cv2.flip(right_frame, -1)
-
-                cv2.imwrite(os.path.join(data_path, 'left_frame.jpg'), left_frame) 
-                cv2.imwrite(os.path.join(data_path, 'right_frame.jpg'), right_frame)
                 np.savez(os.path.join(data_path, 'lidar.npz'), angle=angle, ran=ran, intensity=intensity) 
+
+                with self.controls_lock:
+                    np.savez(os.path.join(data_path, 'controls.npz'), long=self.most_recent_control[0], lat=self.most_recent_control[1]) 
 
     def get_controls(self):
         global RUNNING
         
         c = 'r'
         while RUNNING and c != 'q':
-            try:            
-                c = self.kb.getch()
+            with self.controls_lock:
+                try:            
+                    c = self.kb.getch()
 
-                if c:
-                    self.frames_without_controls = 0
+                    if c:
+                        self.frames_without_controls = 0
 
-                    if c == 'd':
-                        self.car.right()
-                    elif c == 'a':
-                        self.car.left()
-                    elif c == 'w':
-                        self.car.forward()
-                        self.car.straight()
-                    elif c == 's':
-                        self.car.backward()
-                        self.car.straight()
-                    elif c == 'b':
-                        self.car.brake()
-                else:
-                    self.frames_without_controls += 1
+                        if c == 'd':
+                            self.car.right()
+                            self.most_recent_control[1] = 1
+                        elif c == 'a':
+                            self.car.left()
+                            self.most_recent_control[1] = -1
+                        elif c == 'w':
+                            self.car.forward()
+                            self.car.straight()
+                            self.most_recent_control[0] = 1
+                            self.most_recent_control[1] = 0
+                        elif c == 's':
+                            self.car.backward()
+                            self.car.straight()
+                            self.most_recent_control[0] = -1
+                            self.most_recent_control[1] = 0
+                        elif c == 'b':
+                            self.car.brake()
+                            self.most_recent_control[0] = 0
+                    else:
+                        self.frames_without_controls += 1
 
-                    if self.frames_without_controls > 500000:
-                        self.car.straight()
-                        self.car.brake()
-            except IOError:
-                self.car.straight()
-                self.car.brake()
+                        if self.frames_without_controls > 500000:
+                            self.car.straight()
+                            self.car.brake()
+                            self.most_recent_control[0] = 0
+                            self.most_recent_control[1] = 0
+                except IOError:
+                    self.car.straight()
+                    self.car.brake()
 
         RUNNING = False
 

@@ -131,6 +131,24 @@ class StereoCamera:
             framerate=30,
             flip_method=0,
     ):
+        print("nvarguscamerasrc sensor-id=%d sensor-mode=%d ! "
+                "video/x-raw(memory:NVMM), "
+                "width=(int)%d, height=(int)%d, "
+                "format=(string)NV12, framerate=(fraction)%d/1 ! "
+                "nvvidconv flip-method=%d ! "
+                "video/x-raw, width=(int)%d, height=(int)%d, format=(string)BGRx ! "
+                "videoconvert ! "
+                "video/x-raw, format=(string)BGR ! appsink"
+                % (
+                    self.sensor_id,
+                    sensor_mode,
+                    capture_width,
+                    capture_height,
+                    framerate,
+                    flip_method,
+                    display_width,
+                    display_height,
+                ))
         return (
                 "nvarguscamerasrc sensor-id=%d sensor-mode=%d ! "
                 "video/x-raw(memory:NVMM), "
