@@ -33,7 +33,7 @@ class LidarOdometry:
         self.frame_stage = STAGE_DEFAULT_FRAME
 
     def processFrame(self):
-        R, t, row_indices, col_indices = ICP(self.last_frame, self.new_frame, "point2point")
+        R, t, row_indices, col_indices = ICP(self.new_frame, self.last_frame, "point2point")
         t = t.reshape((3,1))
 
         self.cur_t = self.cur_t + self.cur_R.dot(t)

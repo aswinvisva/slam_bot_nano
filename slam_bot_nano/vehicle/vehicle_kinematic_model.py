@@ -9,12 +9,13 @@ normalise_angle = lambda angle : atan2(sin(angle), cos(angle))
 class VehicleKinematicModel:
 
     def __init__(self):
-        self.moving_velocity = 0.1778 # m/s
-        self.l_steer_angle = -1.31019 # radians (75.06835736 degrees)
-        self.r_steer_angle = 1.289959 # radians (73.909206445 degrees)
+        self.moving_velocity = 1 # m/s
+        self.l_steer_angle = 0.131019 # radians (75.06835736 degrees)
+        self.r_steer_angle = -0.1289959 # radians (73.909206445 degrees)
         self.wheel_base_length = 0.15 # m
+        # self.wheel_base_length = 0.25 # m
 
-        self.yaw = 0
+        self.yaw = np.pi/2.0
         self.pos = np.zeros((2, 1))
 
     def update(self, dt, lat_control=0, long_control=0):
