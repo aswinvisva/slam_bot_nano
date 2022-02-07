@@ -16,8 +16,10 @@ from slam_bot_nano.slam.camera_frame import CameraFrame, ORBFeatureExtractor
 from slam_bot_nano.slam.math_utils import *
 from slam_bot_nano.slam.visual_odometry import VisualOdometry
 from slam_bot_nano.slam.lidar_odometry import LidarOdometry
+from slam_bot_nano.slam.map import PointMap
 from slam_bot_nano.slam.depth_estimation import get_depth_est
 from display import Mplot3d
+from slam_bot_nano.vehicle.vehicle_kinematic_model import VehicleKinematicModel
 
 RMAX = 32.0
 
@@ -27,6 +29,7 @@ class Replay:
         self.subfolders = sorted([f.path for f in os.scandir(data_path) if f.is_dir()], key=lambda k: float(os.path.basename(k)))
         self.idx = 0
         self.skip_every=skip_every
+        self.prev_ts = None
 
     def __iter__(self):
         return self
@@ -36,26 +39,32 @@ class Replay:
             raise StopIteration
 
         data_dir = self.subfolders[self.idx]
-        left_frame = cv2.imread(os.path.join(data_dir, 'left_frame.jpg'))
-        right_frame = cv2.imread(os.path.join(data_dir, 'right_frame.jpg'))
+        ts = float(os.path.basename(data_dir))
+        dt = None
+
+        if self.prev_ts is not None:
+            dt = ts - self.prev_ts
+
+        self.prev_ts = ts
+
         with np.load(os.path.join(data_dir, 'lidar.npz')) as data:
             angle = data['angle']
             ran = data['ran']
             intensity = data['intensity']
 
+        with np.load(os.path.join(data_dir, 'controls.npz')) as data:
+            long_control = data['long']
+            lat_control = data['lat']
+
         self.idx += self.skip_every
 
-        return (left_frame, right_frame), (angle, ran, intensity)
+        return (long_control, lat_control, dt), (angle, ran, intensity)
 
 class ControlLoop:
     def __init__(self, path):
         self.replay = Replay(path)
 
-        self.left_grabbed, self.right_grabbed, self.lidar_grabbed = False, False, False
-        self.left_frame, self.right_frame = None, None
-
-        self.left_camera = StereoCamera(0)
-        self.right_camera = StereoCamera(1)
+        self.lidar_grabbed = False
 
         self.plt3d = Mplot3d(title='3D trajectory')
 
@@ -74,35 +83,32 @@ class ControlLoop:
         self.trajectory_sublot.autoscale_view(True,True,True)
         self.trajectory_sublot.grid(True)
 
-        self.trajectory_lidar_fig = plt.figure()
-        self.trajectory_lidar_fig.canvas.set_window_title('Trajectory Lidar')
-        self.trajectory_lidar_subplot = plt.subplot()
-        self.trajectory_lidar_subplot.autoscale_view(True,True,True)
-        self.trajectory_lidar_subplot.grid(True)
-
         self.t0_est = None
         self.traj3d_est = []
-        self.traj3d_est_lidar = []
+        self.traj3d_gt = []
+        self.cur_t_gt = None
 
         self.cur_frame = None
         self.cur_lidar_frame = None
-        self.matched_image = None
         self.trajectory_frame = None
-        self.trajectory_frame_lidar = None
+        self.map_frame = None
 
-        self.vo = VisualOdometry(self.left_camera)
         self.lo = LidarOdometry()
+        self.vkm = VehicleKinematicModel()
 
         self.frame_shape = (360, 640, 3)
 
-        self.map = []
+        self.map = PointMap()
 
-        self.R_matrix = R.from_euler('z', 270, degrees=True).as_matrix()
+        self.r270_matrix = R.from_euler('xyz', [0, 0, 90], degrees=True).as_matrix()
+
+        self.idx = 0
 
     def start(self):
-        for (left_frame, right_frame), (angle, ran, intensity) in self.replay:
-            self.left_frame = left_frame
-            self.right_frame = right_frame
+        for (long_control, lat_control, dt), (angle, ran, intensity) in self.replay:
+            self.recent_long_control = long_control
+            self.recent_lat_control = lat_control
+            self.dt = dt
             self.cur_lidar_frame = (ran, angle)
             self.fig.canvas.draw()
             self.lidar_polar.clear()
@@ -114,68 +120,59 @@ class ControlLoop:
             self.process_data()
             self.display_info()
 
+            if self.idx % 50 == 0:
+                self.map.save("slam_bot_nano/data", "temp_map")
+
+            self.idx += 1
+
         self.plt3d.quit()
+        self.map.save("slam_bot_nano/data", "final_map")
 
     def process_data(self):
         shape = self.frame_shape
 
-        self.vo.update(self.left_frame, 0)
         self.lo.update(self.cur_lidar_frame)
-        self.depth_img = get_depth_est(self.left_frame, self.right_frame)
-        self.depth_img = cv2.resize(self.depth_img, (shape[1], shape[0]))
+        self.cur_R, self.cur_t = self.lo.cur_R.get(), self.lo.cur_t.get()
 
-        self.cur_R, self.cur_t, self.matched_image = self.vo.cur_R, self.vo.cur_t, self.vo.matched_image
-        self.cur_R_lidar, self.cur_t_lidar = self.lo.cur_R, self.lo.cur_t
+        if self.dt is not None:
+            self.vkm.update(self.dt, self.recent_lat_control, self.recent_long_control)
+            pos = self.vkm.pos
+            self.cur_t_gt = np.zeros((3, 1))
+            self.cur_t_gt[0] = pos[0]
+            self.cur_t_gt[1] = pos[1]
 
-        if self.matched_image is not None and self.matched_image.size > 0:
-            self.matched_image = cv2.resize(self.matched_image, (shape[1], shape[0]))
+        # self.cur_R, self.cur_t = self.lo.cur_R, self.lo.cur_t
+        self.map.update(self.cur_lidar_frame, self.idx, self.cur_R, self.cur_t)
+        self.map_frame = self.map.plot()
 
-        if self.cur_R is not None and self.cur_t is not None:
+        if self.cur_t is not None and self.cur_t_gt is not None:
             self.traj3d_est.append(self.cur_t)
-            self.traj3d_est_lidar.append(self.cur_t_lidar)
-
-            points = self.R_matrix @ np.array(self.traj3d_est)
+            self.traj3d_gt.append(self.cur_t_gt)
 
             self.plt3d.drawTraj(self.traj3d_est,'estimated',color='g',marker='.')
+            self.plt3d.drawTraj(self.traj3d_gt,'gt',color='r',marker='.')
+
             self.plt3d.refresh()
 
             self.trajectory_fig.canvas.draw()
             self.trajectory_sublot.clear()
-            self.trajectory_sublot.scatter(points[:, 0], points[:, 1], c=[idx/len(self.traj3d_est) for idx in range(len(self.traj3d_est))],cmap='Blues', alpha=0.95)
+            self.trajectory_sublot.scatter(np.array(self.traj3d_est)[:, 0], np.array(self.traj3d_est)[:, 1], c=[idx/len(self.traj3d_est) for idx in range(len(self.traj3d_est))],cmap='Reds', alpha=0.95)
             trajectory_frame = np.frombuffer(self.trajectory_fig.canvas.tostring_rgb(), dtype='uint8')
             self.trajectory_frame = trajectory_frame.reshape(self.trajectory_fig.canvas.get_width_height()[::-1] + (3,))
             self.trajectory_frame = cv2.resize(self.trajectory_frame, (self.frame_shape[1], self.frame_shape[0]))
 
-            self.trajectory_lidar_fig.canvas.draw()
-            self.trajectory_lidar_subplot.clear()
-            self.trajectory_lidar_subplot.scatter(np.array(self.traj3d_est_lidar)[:, 0], np.array(self.traj3d_est_lidar)[:, 1], c=[idx/len(self.traj3d_est_lidar) for idx in range(len(self.traj3d_est_lidar))],cmap='Reds', alpha=0.95)
-            trajectory_frame_lidar = np.frombuffer(self.trajectory_lidar_fig.canvas.tostring_rgb(), dtype='uint8')
-            self.trajectory_frame_lidar = trajectory_frame_lidar.reshape(self.trajectory_lidar_fig.canvas.get_width_height()[::-1] + (3,))
-            self.trajectory_frame_lidar = cv2.resize(self.trajectory_frame_lidar, (self.frame_shape[1], self.frame_shape[0]))
-
     def display_info(self):
-
-        if self.matched_image is None:
-            self.matched_image = np.zeros(self.frame_shape, dtype=np.uint8)
-
-        if self.depth_img is None:
-            self.depth_img = np.zeros(self.frame_shape, dtype=np.uint8)
-
         if self.trajectory_frame is None:
             self.trajectory_frame = np.zeros(self.frame_shape, dtype=np.uint8)
 
-        if self.trajectory_frame_lidar is None:
-            self.trajectory_frame_lidar = np.zeros(self.frame_shape, dtype=np.uint8)
+        if self.map_frame is None:
+            self.map_frame = np.zeros(self.frame_shape, dtype=np.uint8)
 
-        images = np.hstack((self.left_frame, self.right_frame, self.lidar_frame))
-        tmp = np.hstack((self.matched_image, self.trajectory_frame, self.depth_img))
-        images = np.vstack((images, tmp))
-        tmp = np.hstack((self.trajectory_frame_lidar, np.zeros((self.frame_shape[0], self.frame_shape[1]*2, self.frame_shape[2]), dtype=np.uint8)))
-        images = np.vstack((images, tmp))
+        images = np.hstack((self.trajectory_frame, self.lidar_frame, self.map_frame))
 
         cv2.imshow("Data", images)
         cv2.waitKey(1)
 
 if __name__ == "__main__":
-    cl = ControlLoop("slam_bot_nano/data/runs/home_session")
+    cl = ControlLoop("slam_bot_nano/data/runs/home_session_lidar_only")
     cl.start()

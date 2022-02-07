@@ -1,6 +1,7 @@
 import os
 import math
 
+import cupy as cp_np
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -23,8 +24,8 @@ STAGE_DEFAULT_FRAME = 1
 
 class LidarOdometry:
     def __init__(self):
-        self.cur_R = np.eye(3,3) # current rotation
-        self.cur_t = np.zeros((3,1)) # current translation
+        self.cur_R = cp_np.eye(3,3) # current rotation
+        self.cur_t = cp_np.zeros((3,1)) # current translation
         self.last_frame = None
         self.new_frame = None
         self.frame_stage = 0
@@ -33,7 +34,7 @@ class LidarOdometry:
         self.frame_stage = STAGE_DEFAULT_FRAME
 
     def processFrame(self):
-        R, t, row_indices, col_indices = ICP(self.last_frame, self.new_frame, "point2point")
+        R, t, row_indices, col_indices = ICP(self.new_frame, self.last_frame, "point2point")
         t = t.reshape((3,1))
 
         self.cur_t = self.cur_t + self.cur_R.dot(t)
@@ -41,8 +42,8 @@ class LidarOdometry:
 
     def update(self, point_cloud):
         point_cloud = pol2cart(*point_cloud)
-        point_cloud = np.vstack(point_cloud).T
-        point_cloud = np.append(point_cloud, np.zeros((point_cloud.shape[0], 1)), axis=1)
+        point_cloud = cp_np.vstack(point_cloud).T
+        point_cloud = cp_np.append(point_cloud, cp_np.zeros((point_cloud.shape[0], 1)), axis=1)
         point_cloud = Point_cloud().init_from_points(point_cloud)
 
         self.new_frame = point_cloud
@@ -80,7 +81,7 @@ class Point_cloud:
             path: input path
         """
         tmp = read_ply(path)
-        self.points = np.vstack((tmp['x'],tmp['y'],tmp['z'])).T
+        self.points = cp_np.vstack((tmp['x'],tmp['y'],tmp['z'])).T
         self._init()
 
 
@@ -93,9 +94,9 @@ class Point_cloud:
             t : transormation
         """
         if R is None:
-            R = np.eye(3)
+            R = cp_np.eye(3)
         if t is None:
-            t = np.zeros(3)
+            t = cp_np.zeros(3)
 
         self.points = initial.points @ R.T + t
         self._init()
@@ -115,7 +116,7 @@ class Point_cloud:
         """
         Common function for every initialization function
         """
-        self.kdtree = KDTree(self.points)
+        self.kdtree = KDTree(self.points.get())
         self.n  = self.points.shape[0]
         self.all_eigenvalues = None
         self.all_eigenvectors = None
@@ -141,14 +142,14 @@ class Point_cloud:
         if self.nn is None:
             self.nn = self.kdtree.query_radius(self.points,r = radius, return_distance = False)
 
-        all_eigenvalues = np.zeros((self.n, 3))
-        all_eigenvectors = np.zeros((self.n, 3, 3))
+        all_eigenvalues = cp_np.zeros((self.n, 3))
+        all_eigenvectors = cp_np.zeros((self.n, 3, 3))
 
         for i in range(self.n):
             if len(self.nn[i]) < 3:
-                all_eigenvalues[i], all_eigenvectors[i] = (np.array([0,0,0]),np.eye(3))
+                all_eigenvalues[i], all_eigenvectors[i] = (cp_np.array([0,0,0]),cp_np.eye(3))
             else:
-                all_eigenvalues[i], all_eigenvectors[i] = np.linalg.eigh(np.cov(self.points[self.nn[i]].T))
+                all_eigenvalues[i], all_eigenvectors[i] = cp_np.linalg.eigh(cp_np.cov(self.points[self.nn[i]].T))
 
         return all_eigenvalues, all_eigenvectors
 
@@ -175,12 +176,12 @@ class Point_cloud:
             array of Projection matrices on each of the normals
         """
         if indexes is None:
-            indexes = np.arange(self.n)
+            indexes = cp_np.arange(self.n)
 
         all_eigenvectors = self.get_eigenvectors()
         normals = all_eigenvectors[:,:,0]
-        normals = normals / np.linalg.norm(normals, axis = 1, keepdims = True)
-        return np.array([normals[i,:,None]*normals[i,None,:] for i in indexes])
+        normals = normals / cp_np.linalg.norm(normals, axis = 1, keepdims = True)
+        return cp_np.array([normals[i,:,None]*normals[i,None,:] for i in indexes])
 
     def get_covariance_matrices_plane2plane(self, epsilon  = 1e-3,indexes = None):
         """
@@ -192,12 +193,12 @@ class Point_cloud:
         returns: array of covariance matrices for each point of indexes
         """
         if indexes is None:
-            indexes = np.arange(self.n)
+            indexes = cp_np.arange(self.n)
         d = 3
         new_n = indexes.shape[0]
-        cov_mat = np.zeros((new_n,d,d))
+        cov_mat = cp_np.zeros((new_n,d,d))
         all_eigenvectors = self.get_eigenvectors()
-        dz_cov_mat = np.eye(d)
+        dz_cov_mat = cp_np.eye(d)
         dz_cov_mat[0,0] = epsilon
         for i in range(new_n):
             U = all_eigenvectors[indexes[i]]
@@ -211,20 +212,20 @@ def elementary_rot_mat(theta):
     """
 
 
-    R_x = np.array([[1,         0,                 0                ],
-                    [0,         np.cos(theta[0]), -np.sin(theta[0]) ],
-                    [0,         np.sin(theta[0]), np.cos(theta[0])  ]
+    R_x = cp_np.array([[1,         0,                 0                ],
+                    [0,         cp_np.cos(theta[0]), -cp_np.sin(theta[0]) ],
+                    [0,         cp_np.sin(theta[0]), cp_np.cos(theta[0])  ]
                     ])
 
 
 
-    R_y = np.array([[np.cos(theta[1]),    0,      np.sin(theta[1])  ],
+    R_y = cp_np.array([[cp_np.cos(theta[1]),    0,      cp_np.sin(theta[1])  ],
                     [0,                   1,      0                 ],
-                    [-np.sin(theta[1]),   0,      np.cos(theta[1])  ]
+                    [-cp_np.sin(theta[1]),   0,      cp_np.cos(theta[1])  ]
                     ])
 
-    R_z = np.array([[np.cos(theta[2]),    -np.sin(theta[2]),    0],
-                    [np.sin(theta[2]),    np.cos(theta[2]),     0],
+    R_z = cp_np.array([[cp_np.cos(theta[2]),    -cp_np.sin(theta[2]),    0],
+                    [cp_np.sin(theta[2]),    cp_np.cos(theta[2]),     0],
                     [0,                   0,                    1]
                     ])
 
@@ -246,22 +247,24 @@ def best_transform(data, ref, method = "point2point", indexes_d = None, indexes_
     """
 
     if indexes_d is None:
-        indexes_d = np.arange(data.shape[0])
+        indexes_d = cp_np.arange(data.shape[0])
     if indexes_r is None:
-        indexes_r = np.arange(ref.shape[0])
+        indexes_r = cp_np.arange(ref.shape[0])
 
     assert(indexes_d.shape == indexes_r.shape)
     n = indexes_d.shape[0]
     if method == "point2point":
-        x0 = np.zeros(6)
-        M = np.array([np.eye(3) for i in range(n)])
-        f = lambda x: loss(x,data.points[indexes_d],ref.points[indexes_r],M)
-        df = lambda x: grad_loss(x,data.points[indexes_d],ref.points[indexes_r],M)
+        x0 = cp_np.zeros(6)
+        M = cp_np.array([cp_np.eye(3) for i in range(n)])
+        # f = lambda x: loss(x,data.points[indexes_d],ref.points[indexes_r],M)
+        # df = lambda x: grad_loss(x,data.points[indexes_d],ref.points[indexes_r],M)
+        f = lambda x: loss(x,data.points[indexes_d].get(),ref.points[indexes_r].get(),M.get())
+        df = lambda x: grad_loss(x,data.points[indexes_d].get(),ref.points[indexes_r].get(),M.get())
 
-        x = fmin_cg(f = f,x0 = x0,fprime = df, disp = False)
+        x = fmin_cg(f = f,x0 = x0.get(),fprime = df, disp = False)
 
     elif method == "point2plane":
-        x0 = np.zeros(6)
+        x0 = cp_np.zeros(6)
         M = ref.get_projection_matrix_point2plane(indexes = indexes_r)
         f = lambda x: loss(x,data.points[indexes_d],ref.points[indexes_r],M)
         df = lambda x: grad_loss(x,data.points[indexes_d],ref.points[indexes_r],M)
@@ -272,18 +275,18 @@ def best_transform(data, ref, method = "point2point", indexes_d = None, indexes_
         cov_data = data.get_covariance_matrices_plane2plane(indexes = indexes_d)
         cov_ref = ref.get_covariance_matrices_plane2plane(indexes = indexes_r, epsilon = 0.01)
 
-        last_min = np.inf
+        last_min = cp_np.inf
         cpt = 0
         n_iter_max = 50
-        x = np.zeros(6)
+        x = cp_np.zeros(6)
         tol = 1e-6
         while True:
             cpt = cpt+1
             R = rot_mat(x[3:])
-            M = np.array([np.linalg.inv(cov_ref[i] + R @ cov_data[i] @ R.T) for i in range(n)])
+            M = cp_np.array([cp_np.linalg.inv(cov_ref[i] + R @ cov_data[i] @ R.T) for i in range(n)])
 
-            f = lambda x: loss(x,data.points[indexes_d],ref.points[indexes_r],M)
-            df = lambda x: grad_loss(x,data.points[indexes_d],ref.points[indexes_r],M)
+            f = lambda x: loss(x.get(),data.points[indexes_d].get(),ref.points[indexes_r].get(),M.get())
+            df = lambda x: grad_loss(x.get(),data.points[indexes_d].get(),ref.points[indexes_r].get(),M.get())
 
             out = fmin_cg(f = f, x0 = x, fprime = df, disp = False, full_output = True)
 
@@ -371,7 +374,6 @@ def ICP(data,ref,method, exclusion_radius = 0.5, sampling_limit = None, verbose 
         T: translation (length 3)
         rms_list: list of rms at the end of each ICP iteration
     """
-
     data_aligned = Point_cloud()
     data_aligned.init_from_transfo(data)
 
@@ -381,14 +383,14 @@ def ICP(data,ref,method, exclusion_radius = 0.5, sampling_limit = None, verbose 
     dist_threshold = exclusion_radius
     RMS_threshold = 1e-4
     diff_thresh = 1e-3
-    rms = np.inf
+    rms = cp_np.inf
     while(True):
         if sampling_limit is None:
-            samples = np.arange(data.n)
+            samples = cp_np.arange(data.n)
         else:
-            samples = np.random.choice(data.n,size = sampling_limit,replace = False)
+            samples = cp_np.random.choice(data.n,size = sampling_limit,replace = False)
 
-        dist,neighbors = ref.kdtree.query(data_aligned.points[samples], return_distance = True)
+        dist,neighbors = ref.kdtree.query(data_aligned.points[samples].get(), return_distance = True)
 
         dist = dist.flatten()
         neighbors = neighbors.flatten()
@@ -397,8 +399,10 @@ def ICP(data,ref,method, exclusion_radius = 0.5, sampling_limit = None, verbose 
         indexes_r = neighbors[dist < dist_threshold]
 
         R, T = best_transform(data, ref, method, indexes_d, indexes_r, verbose = verbose)
+        R = cp_np.array(R)
+        T = cp_np.array(T)
         data_aligned.init_from_transfo(data, R,T)
-        new_rms = np.sqrt(np.mean(np.sum((data_aligned.points[samples]-ref.points[neighbors])**2,axis = 0)))
+        new_rms = cp_np.sqrt(cp_np.mean(cp_np.sum((data_aligned.points[samples]-ref.points[neighbors])**2,axis = 0)))
         rms_list.append(new_rms)
         if verbose:
             print("Iteration {} of ICP complete with RMS : {}".format(cpt+1,new_rms))
