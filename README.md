@@ -2,6 +2,8 @@
 
 This project contains a collection of (slow) algorithms for odometry, trajectory estimation and mapping from 2D Lidar or stereo cameras.
 
+<img src="https://github.com/aswinvisva/slam_bot_nano/blob/main/examples/example.gif"/>
+
 ## Next Steps:
 
 * Code optimizations to approach real-time performance on the Jetson Nano (Re-write everything in C++)
