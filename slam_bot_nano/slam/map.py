@@ -3,6 +3,9 @@ import cupy as cp_np
 from slam_bot_nano.slam.math_utils import *
 
 
+from slam_bot_nano.slam.math_utils import *
+
+
 class PointMap:
 
     def __init__(self, grid_size=(250, 250), grid_unit_size=0.02):
