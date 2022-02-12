@@ -1,31 +1,116 @@
+import os
+import math
+
 import numpy as np
 import cv2
+import matplotlib.pyplot as plt
+import matplotlib
+from sklearn import linear_model, datasets
+from scipy.optimize import linear_sum_assignment
+from scipy.spatial.distance import cdist
+from sklearn.neighbors import NearestNeighbors
+from scipy.optimize import fmin_cg
+import numpy as np
+from sklearn.neighbors import KDTree
 
 
-def estimatePose(self, kps_ref_unmatched, kps_cur_unmatched, matches, cam, kUseEssentialMatrixEstimation=True):	
+def elementary_rot_mat(theta):
+    """
+    Returns the 3 rotations around each axe
+    """
 
-    kps_ref = []
-    kps_cur = []
-    for i,(m) in enumerate(matches):
-        if m.distance < 20:
-            kps_cur.append(kps_cur_unmatched[m.trainIdx].pt)
-            kps_ref.append(kps_ref_unmatched[m.queryIdx].pt)
 
-    kps_cur  = np.asarray(kps_cur)
-    kps_ref = np.asarray(kps_ref)
+    R_x = np.array([[1,         0,                 0                ],
+                    [0,         np.cos(theta[0]), -np.sin(theta[0]) ],
+                    [0,         np.sin(theta[0]), np.cos(theta[0])  ]
+                    ])
 
-    kp_ref_u = cam.undistort_points(kps_ref)	
-    kp_cur_u = cam.undistort_points(kps_cur)	        
-    kpn_ref = cam.unproject_points(kp_ref_u)
-    kpn_cur = cam.unproject_points(kp_cur_u)
 
-    if kUseEssentialMatrixEstimation:
-        # the essential matrix algorithm is more robust since it uses the five-point algorithm solver by D. Nister (see the notes and paper above )
-        E, mask_match = cv2.findEssentialMat(kpn_cur, kpn_ref, focal=1, pp=(0., 0.), method=cv2.RANSAC, prob=kRansacProb, threshold=kRansacThresholdNormalized)
-    else:
-        # just for the hell of testing fundamental matrix fitting ;-) 
-        F, mask_match = computeFundamentalMatrix(kp_cur_u, kp_ref_u)
-        E = cam.K.T @ F @ cam.K    # E = K.T * F * K 
-    #self.removeOutliersFromMask(self.mask)  # do not remove outliers, the last unmatched/outlier features can be matched and recognized as inliers in subsequent frames                          
-    _, R, t, mask = cv2.recoverPose(E, kpn_cur, self.kpn_ref, focal=1, pp=(0., 0.))   
-    return R,t  # Rrc, trc (with respect to 'ref' frame) 
+
+    R_y = np.array([[np.cos(theta[1]),    0,      np.sin(theta[1])  ],
+                    [0,                   1,      0                 ],
+                    [-np.sin(theta[1]),   0,      np.cos(theta[1])  ]
+                    ])
+
+    R_z = np.array([[np.cos(theta[2]),    -np.sin(theta[2]),    0],
+                    [np.sin(theta[2]),    np.cos(theta[2]),     0],
+                    [0,                   0,                    1]
+                    ])
+
+    return R_x, R_y, R_z
+
+def rot_mat(theta) :
+    """
+    Returns the Rotation matrix for the rotation parametrized with theta
+    Convention rotation around X then around Y then around Z
+    """
+    R_x,R_y,R_z = elementary_rot_mat(theta)
+    R = R_z @ R_y @ R_x
+
+    return R
+
+
+def grad_rot_mat(theta):
+    """
+    Computes the gradient of the rotation matrix w.r.t the X,Y,Z euler angles
+    Returns res[i,j,k] = dR_jk/theta_i
+    """
+    res = np.zeros((3,3,3))
+
+    R_x,R_y,R_z = elementary_rot_mat(theta)
+
+    g_x = np.array([[0,         0,                  0                ],
+                    [0,         -np.sin(theta[0]), -np.cos(theta[0]) ],
+                    [0,         np.cos(theta[0]),  -np.sin(theta[0]) ]
+                    ])
+
+    g_y = np.array([[-np.sin(theta[1]),   0,      np.cos(theta[1])  ],
+                    [0,                   0,      0                 ],
+                    [-np.cos(theta[1]),   0,      -np.sin(theta[1]) ]
+                    ])
+
+    g_z = np.array([[-np.sin(theta[2]),   -np.cos(theta[2]),    0],
+                    [np.cos(theta[2]),    -np.sin(theta[2]),    0],
+                    [0,                   0,                    0]
+                    ])
+
+    res[0,:,:] = R_z @ R_y @ g_x
+    res[1,:,:] = R_z @ g_y @ R_x
+    res[2,:,:] = g_z @ R_y @ R_x
+
+    return res
+
+def pol2cart(rho, phi):
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return (x, y)
+
+def cart2pol(x, y):
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return (rho, phi)
+
+# [4x4] homogeneous T from [3x3] R and [3x1] t
+def poseRt(R, t):
+    ret = np.eye(4)
+    ret[:3, :3] = R
+    ret[:3, 3] = t
+    return ret
+
+def Rtpose(Rt):
+    R = Rt[:3, :3]
+    t = Rt[:3, 3]
+    return R, t
+
+def rot2euler(R) :
+    sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
+    singular = sy < 1e-6
+    if  not singular :
+        x = math.atan2(R[2,1] , R[2,2])
+        y = math.atan2(-R[2,0], sy)
+        z = math.atan2(R[1,0], R[0,0])
+    else :
+        x = math.atan2(-R[1,2], R[1,1])
+        y = math.atan2(-R[2,0], sy)
+        z = 0
+    return np.array([x, y, z])

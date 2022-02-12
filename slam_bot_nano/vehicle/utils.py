@@ -20,7 +20,7 @@ def init_bot():
             self.car.steering = 1
 
         def straight(self):
-            self.car.steering = 0.55
+            self.car.steering = 0.6375
 
         def forward(self):
             self.car.throttle = -0.3

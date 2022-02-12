@@ -2,7 +2,10 @@ import cv2
 import numpy as np
 import threading
 
-FILE_NAMES = {0: "../data/calib_left.npz", 1: "../data/calib_right.npz"}
+FILE_NAMES = {
+    0: "slam_bot_nano/data/calib_left.npz",
+    1: "slam_bot_nano/data/calib_right.npz"
+}
 
 class StereoCamera:
 
@@ -25,8 +28,35 @@ class StereoCamera:
 
         with np.load(FILE_NAMES[sensor_id]) as data:
             self.K = data['mtx']
+            self.D = data['dist']
 
         self.Kinv = np.linalg.inv(self.K)
+
+        self.is_distorted = np.linalg.norm(self.D) > 1e-10
+
+    @property
+    def cx(self):
+        return self.K[0, 2]
+
+    @property
+    def cy(self):
+        return self.K[1, 2]
+
+    @property
+    def fx(self):
+        return self.K[0, 0]
+
+    @property
+    def fy(self):
+        return self.K[1, 1]
+
+    @property
+    def height(self):
+        return 360
+
+    @property
+    def width(self):
+        return 640
 
     #Opening the cameras
     def open(self, gstreamer_pipeline_string):
@@ -101,6 +131,24 @@ class StereoCamera:
             framerate=30,
             flip_method=0,
     ):
+        print("nvarguscamerasrc sensor-id=%d sensor-mode=%d ! "
+                "video/x-raw(memory:NVMM), "
+                "width=(int)%d, height=(int)%d, "
+                "format=(string)NV12, framerate=(fraction)%d/1 ! "
+                "nvvidconv flip-method=%d ! "
+                "video/x-raw, width=(int)%d, height=(int)%d, format=(string)BGRx ! "
+                "videoconvert ! "
+                "video/x-raw, format=(string)BGR ! appsink"
+                % (
+                    self.sensor_id,
+                    sensor_mode,
+                    capture_width,
+                    capture_height,
+                    framerate,
+                    flip_method,
+                    display_width,
+                    display_height,
+                ))
         return (
                 "nvarguscamerasrc sensor-id=%d sensor-mode=%d ! "
                 "video/x-raw(memory:NVMM), "
@@ -123,19 +171,26 @@ class StereoCamera:
         )
 
     def project(self, xcs):
-        projs = self.K @ xcs.T     
-        zs = projs[-1]      
-        projs = projs[:2]/ zs   
+        projs = self.K @ xcs.T
+        zs = projs[-1]
+        projs = projs[:2]/ zs
         return projs.T, zs
 
     def unproject_points(self, pts):
+        # turn [[x,y]] -> [[x,y,1]]
+        def add_ones(x):
+            if len(x.shape) == 1:
+                return add_ones_1D(x)
+            else:
+                return np.concatenate([x, np.ones((x.shape[0], 1))], axis=1)
+
         return np.dot(self.Kinv, add_ones(pts).T).T[:, 0:2]
 
     def undistort_points(self, pts):
         if self.is_distorted:
-            #uvs_undistorted = cv2.undistortPoints(np.expand_dims(uvs, axis=1), self.K, self.D, None, self.K)   # =>  Error: while undistorting the points error: (-215:Assertion failed) src.isContinuous() 
+            #uvs_undistorted = cv2.undistortPoints(np.expand_dims(uvs, axis=1), self.K, self.D, None, self.K)   # =>  Error: while undistorting the points error: (-215:Assertion failed) src.isContinuous()
             uvs_contiguous = np.ascontiguousarray(pts[:, :2]).reshape((pts.shape[0], 1, 2))
-            uvs_undistorted = cv2.undistortPoints(uvs_contiguous, self.K, self.D, None, self.K)            
+            uvs_undistorted = cv2.undistortPoints(uvs_contiguous, self.K, self.D, None, self.K)
             return uvs_undistorted.ravel().reshape(uvs_undistorted.shape[0], 2)
         else:
-            return pts 
+            return pts
